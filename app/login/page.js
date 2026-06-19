@@ -34,7 +34,7 @@ function brazilianToIsoDate(value) {
   return `${year}-${month}-${day}`;
 }
 
-// Renomeado apenas para rodar dentro do Suspense sem perder nenhuma função ou lógica interna
+// Componente interno que roda as funções e hooks com segurança
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -61,54 +61,3 @@ function LoginContent() {
     return () => {
       if (logoTimeoutRef.current) window.clearTimeout(logoTimeoutRef.current);
     };
-  }, []);
-
-  function resetLogoEasterEgg() {
-    if (logoTimeoutRef.current) {
-      window.clearTimeout(logoTimeoutRef.current);
-      logoTimeoutRef.current = null;
-    }
-    setShowEasterEgg(false);
-  }
-
-  function handleLogoMouseEnter() {
-    resetLogoEasterEgg();
-
-    logoTimeoutRef.current = window.setTimeout(() => {
-      setShowEasterEgg(true);
-    }, 15000);
-  }
-
-  function handleLogoMouseLeave() {
-    resetLogoEasterEgg();
-  }
-
-  function handleTelefoneChange(event) {
-    setTelefone(formatPhone(event.target.value));
-  }
-
-  function handleDataNascimentoChange(event) {
-    setDataNascimento(formatDateInput(event.target.value));
-  }
-
-  function toggleTipoUsuario() {
-    const next = tipoUsuario === 'nutricionista' ? 'paciente' : 'nutricionista';
-    setTipoUsuario(next);
-    setEmail('');
-    setPassword('');
-    setTelefone('');
-    setDataNascimento('');
-    setErrorMessage('');
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setErrorMessage('');
-    setLoading(true);
-
-    try {
-      let response;
-      let data;
-
-      if (tipoUsuario === 'paciente') {
-        const rawPhone = onlyNumbers(telefone
