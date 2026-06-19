@@ -54,13 +54,10 @@ export default function HomePage() {
               <Link href="/login" className="inline-flex items-center justify-center rounded-full bg-gradient-to-b from-brand to-brand-hover px-10 py-4 text-base font-semibold text-white shadow-lg shadow-brand/30 transition duration-200 hover:shadow-xl hover:shadow-brand/40">
                 Entrar
               </Link>
-              <button type="button" className="inline-flex items-center justify-center rounded-full border border-brand/25 bg-white/50 px-10 py-4 text-base font-semibold text-brand-dark shadow-sm backdrop-blur-sm transition duration-200 hover:bg-white/80 hover:border-brand/40">
-                Ver demonstração
-              </button>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3 pt-8">
-              {['Acesso antecipado', 'Sem compromisso', 'Suporte humano'].map((item) => (
+              {['Acesso antecipado', 'Simples e fácil', 'Suporte humano'].map((item) => (
                 <div key={item} className="inline-flex items-center justify-center gap-2.5 rounded-full border border-brand/10 bg-gradient-to-br from-white to-brand/5 px-5 py-3 text-sm font-medium text-brand-dark shadow-sm backdrop-blur-sm transition duration-200 hover:bg-white hover:border-brand/20">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand text-xs text-white font-bold">✓</span>
                   {item}
