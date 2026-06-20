@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import BackButton from '@/components/back-button';
 
@@ -34,7 +34,8 @@ function brazilianToIsoDate(value) {
   return `${year}-${month}-${day}`;
 }
 
-export default function LoginPage() {
+// Componente interno que roda as funções e hooks com segurança
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tipoUsuario, setTipoUsuario] = useState('nutricionista');
@@ -93,7 +94,6 @@ export default function LoginPage() {
   function toggleTipoUsuario() {
     const next = tipoUsuario === 'nutricionista' ? 'paciente' : 'nutricionista';
     setTipoUsuario(next);
-    // limpar todos os campos para evitar mistura de valores
     setEmail('');
     setPassword('');
     setTelefone('');
@@ -104,7 +104,6 @@ export default function LoginPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     setErrorMessage('');
-
     setLoading(true);
 
     try {
@@ -180,17 +179,17 @@ export default function LoginPage() {
         return;
       }
 
-        localStorage.removeItem('token');
-        localStorage.removeItem('authToken');
-        localStorage.setItem('token', token);
-        localStorage.setItem('authToken', token);
-        localStorage.setItem('authUser', 'nutricionista');
-        setMensagemBemVindo('Bem-vindo à ferramenta que facilita a vida de seus pacientes! Carregando sua plataforma...');
-        setExibirBemVindo(true);
-        setTimeout(() => {
-          router.push('/nutricionista/dashboard');
-        }, 2000);
-        return;
+      localStorage.removeItem('token');
+      localStorage.removeItem('authToken');
+      localStorage.setItem('token', token);
+      localStorage.setItem('authToken', token);
+      localStorage.setItem('authUser', 'nutricionista');
+      setMensagemBemVindo('Bem-vindo à ferramenta que facilita a vida de seus pacientes! Carregando sua plataforma...');
+      setExibirBemVindo(true);
+      setTimeout(() => {
+        router.push('/nutricionista/dashboard');
+      }, 2000);
+      return;
     } catch (error) {
       setErrorMessage(error?.message || 'Não foi possível conectar ao servidor. Tente novamente.');
     } finally {
@@ -442,41 +441,35 @@ export default function LoginPage() {
       </div>
       <style jsx>{`
         @keyframes frameShow1 {
-          0%, 24.99% {
-            opacity: 1;
-          }
-          25%, 100% {
-            opacity: 0;
-          }
+          0%, 24.99% { opacity: 1; }
+          25%, 100% { opacity: 0; }
         }
-
         @keyframes frameShow2 {
-          25%, 49.99% {
-            opacity: 1;
-          }
-          0%, 24.99%, 50%, 100% {
-            opacity: 0;
-          }
+          25%, 49.99% { opacity: 1; }
+          0%, 24.99%, 50%, 100% { opacity: 0; }
         }
-
         @keyframes frameShow3 {
-          50%, 74.99% {
-            opacity: 1;
-          }
-          0%, 49.99%, 75%, 100% {
-            opacity: 0;
-          }
+          50%, 74.99% { opacity: 1; }
+          0%, 49.99%, 75%, 100% { opacity: 0; }
         }
-
         @keyframes frameShow4 {
-          75%, 99.99% {
-            opacity: 1;
-          }
-          0%, 74.99%, 100% {
-            opacity: 0;
-          }
+          75%, 99.99% { opacity: 1; }
+          0%, 74.99%, 100% { opacity: 0; }
         }
       `}</style>
     </div>
+  );
+}
+
+// Export principal envelopado no Suspense exigido pelo Next.js e pela Vercel
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff', color: '#666' }}>
+        Carregando formulário...
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }

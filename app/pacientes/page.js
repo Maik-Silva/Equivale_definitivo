@@ -177,8 +177,7 @@ export default function PacientesPage() {
   }
 
   async function handleCopyPatientLink(patient) {
-    const urlAcesso = `https://equivale-saas.vercel.app/login?usuario=${encodeURIComponent(patient.email)}`;
-    const patientKey = patient.id || patient.email;
+const urlAcesso = `https://plataformaequivale.netlify.app/login?usuario=${encodeURIComponent(patient.email)}`;    const patientKey = patient.id || patient.email;
 
     try {
       await navigator.clipboard.writeText(urlAcesso);
