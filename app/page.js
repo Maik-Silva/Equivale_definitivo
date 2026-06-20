@@ -36,7 +36,7 @@ export default function HomePage() {
                 Plataforma para nutricionistas
               </div>
 
-              <h1 className="mt-12 text-6xl font-bold tracking-tight text-brand-dark sm:text-7xl">
+              <h1 className="mt-12 text-4xl font-bold tracking-tight text-brand-dark leading-tight sm:text-6xl lg:text-7xl whitespace-normal break-words">
                 Equivalências alimentares
                 <span className="block bg-gradient-to-r from-brand via-[#47c070] to-[#3AAB59] bg-clip-text text-transparent">
                   com a sua marca

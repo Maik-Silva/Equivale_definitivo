@@ -12,7 +12,6 @@ const mensagensEspeciais = {
   'maikdk@teste.com': 'Fala, desenvolvedor! 🚀 Teste de transição funcionando 100%. Bora subir esse SaaS para o Netlify!',
   'lohanyrodrigues20@gmail.com': 'Conta criada! O código rodou perfeitamente para receber a pessoa que mais me inspira todos os dias. Ter você testando isso comigo faz tudo valer a pena. Obrigado por ser minha parceira de vida. Te amo!❤️🌟',
   'natalia_ribeiro_@outlook.com.br': 'Prontinho! O sistema avisou que uma usuária especial do banco de dados acabou de se cadastrar. Avisamos os desenvolvedores que a Natalia é uma exceção exclusiva por aqui. É um prazer ter você no site!. ps. não comente dessa tela kkk',
-  'renang15@gmail.com': 'Pronto cadastro realizado seu GAY',
 };
 
 export default function RegisterPage() {

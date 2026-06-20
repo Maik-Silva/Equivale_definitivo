@@ -168,6 +168,8 @@ export default function EquivalePage() {
   const [groupWarning, setGroupWarning] = useState('');
   const [lastPayload, setLastPayload] = useState(null);
   const [showPayload, setShowPayload] = useState(false);
+  const [historico, setHistorico] = useState([]);
+  const [exibirHistorico, setExibirHistorico] = useState(false);
   const [baseOptions, setBaseOptions] = useState([]);
   const [substituteOptions, setSubstituteOptions] = useState([]);
   const [loadingEquivalence, setLoadingEquivalence] = useState(false);
@@ -185,6 +187,33 @@ export default function EquivalePage() {
     if (!perfil) return;
     setBrand((current) => ({ ...defaultBrand, ...current, ...perfil }));
   }, [perfil]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('historicoEquivalencias');
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        setHistorico(parsed);
+      }
+    } catch (error) {
+      console.warn('Não foi possível carregar o histórico de equivalências:', error);
+    }
+  }, []);
+
+  function getEquivalentQuantity(payload) {
+    if (!payload) return '';
+    const equivalencia = payload.equivalencia || payload.equivalent || payload.equivalente || payload || {};
+    return equivalencia?.quantidade
+      || equivalencia?.quantidade_equivalente
+      || equivalencia?.qtd
+      || equivalencia?.quantidadeSubstituto
+      || equivalencia?.quantidade
+      || payload.equivalentQuantity
+      || payload.equivalent_quantity
+      || payload.equivalent
+      || '';
+  }
 
   async function loadSuggestions(value, setOptions) {
     if (!apiUrl || value.trim().length < 2) {
@@ -337,9 +366,36 @@ export default function EquivalePage() {
       console.debug('Equivale payload:', payload);
       const responseText = getResponseText(payload);
       const warning = getGroupWarning(payload);
+      const equivalentQuantity = getEquivalentQuantity(payload);
+      const formattedEquivalentQuantity = equivalentQuantity ? formatQuantity(equivalentQuantity) : '';
 
       setResultText(responseText || `Resultado calculado para ${quantity.trim()}g de ${baseFood.trim()}.`);
       setGroupWarning(warning);
+
+      const newEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        date: new Date().toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        baseFood: baseFood.trim(),
+        baseQuantity: quantity.trim(),
+        substituteFood: substituteFood.trim(),
+        equivalentQuantity: formattedEquivalentQuantity,
+      };
+
+      setHistorico((current) => {
+        const next = [newEntry, ...current].slice(0, 20);
+        try {
+          localStorage.setItem('historicoEquivalencias', JSON.stringify(next));
+        } catch (error) {
+          console.warn('Não foi possível salvar o histórico no localStorage:', error);
+        }
+        return next;
+      });
     } catch (error) {
       toast({ title: 'Erro', description: 'Não foi possível calcular a equivalência.' });
     } finally {
@@ -404,13 +460,13 @@ export default function EquivalePage() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-10">
+      <main className="w-full px-4 py-10">
         <div className="mb-6">
           <BackButton href="/nutricionista/dashboard" />
         </div>
-        <div className="mx-auto max-w-5xl">
+        <div className="mx-auto w-full max-w-5xl">
           <div className="space-y-8">
-            <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
+            <section className="w-full rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
               <div className="grid gap-6">
                 <div className="flex flex-col items-center gap-4 text-center">
                   {(brand.logo || brand.logo_url) ? (
@@ -421,8 +477,8 @@ export default function EquivalePage() {
                     </div>
                   )}
                   <div>
-                    <h1 className="text-3xl font-semibold tracking-tight text-slate-900">{brand.nome}</h1>
-                    <p className="mt-2 text-sm text-slate-600">{brand.especialidade}</p>
+                    <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">{brand.nome}</h1>
+                    <p className="mt-2 text-sm text-slate-600 sm:text-base">{brand.especialidade}</p>
                   </div>
                 </div>
 
@@ -486,7 +542,7 @@ export default function EquivalePage() {
                   <div className="mt-4">
                     {resultText ? (
                       <div className="rounded-3xl border border-slate-200 bg-white p-5 text-slate-900 shadow-sm">
-                        <p className="text-base leading-7 font-semibold tracking-tight text-slate-900">{resultText}</p>
+                        <p className="text-base leading-7 font-semibold tracking-tight text-slate-900 sm:text-lg">{resultText}</p>
                       </div>
                     ) : (
                       <p className="text-sm leading-6 text-slate-600">Digite os alimentos e clique em calcular para ver a equivalência.</p>
@@ -497,6 +553,36 @@ export default function EquivalePage() {
                         <p className="mt-2 leading-6">{groupWarning}</p>
                       </div>
                     ) : null}
+
+                    <button
+                      type="button"
+                      onClick={() => setExibirHistorico(!exibirHistorico)}
+                      className="w-full mt-4 py-2.5 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm transition-all text-center"
+                    >
+                      {exibirHistorico ? 'Ocultar Histórico' : 'Substituições Anteriores'}
+                    </button>
+
+                    {exibirHistorico && (
+                      <div className="mt-4 space-y-3 w-full">
+                        <h3 className="text-sm font-bold text-gray-500 px-1">Histórico Recente</h3>
+                        {historico.length === 0 ? (
+                          <p className="text-xs text-gray-400 italic text-center py-2 bg-gray-50 rounded-lg">Nenhuma substituição salva ainda.</p>
+                        ) : (
+                          historico.map((item) => (
+                            <div key={item.id} className="p-3 bg-white rounded-lg border border-gray-100 shadow-sm text-xs">
+                              <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+                                <span>{item.data}</span>
+                              </div>
+                              <p className="text-gray-700">
+                                <span className="font-semibold text-gray-900">{item.baseQuantity}g</span> de {item.baseFood}{' '}
+                                <span className="text-gray-400">-&gt;</span>{' '}
+                                <span className="font-bold text-emerald-600">{item.equivalentQuantity}g</span> de {item.substituteFood}
+                              </p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
 
                     {/* Debug: raw payload viewer - toggleable */}
                     {lastPayload ? (
