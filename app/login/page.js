@@ -4,8 +4,10 @@ import { useEffect, useRef, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import BackButton from '@/components/back-button';
 
-const API_LOGIN_URL = 'https://backend-production-e77b.up.railway.app/api/auth/login';
-const API_PATIENT_LOGIN_URL = 'https://backend-production-e77b.up.railway.app/api/auth/login-paciente';
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'https://backend-production-e77b.up.railway.app';
+const API_LOGIN_URL = `${BACKEND_URL}/api/auth/login`;
+const API_ADMIN_LOGIN_URL = `${BACKEND_URL}/api/auth/login-admin`;
+const API_PATIENT_LOGIN_URL = `${BACKEND_URL}/api/auth/login-paciente`;
 
 function onlyNumbers(value) {
   return value.replace(/\D/g, '');
@@ -46,9 +48,18 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showEasterEgg, setShowEasterEgg] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [adminError, setAdminError] = useState('');
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [logoClickCount, setLogoClickCount] = useState(0);
   const [exibirBemVindo, setExibirBemVindo] = useState(false);
   const [mensagemBemVindo, setMensagemBemVindo] = useState('');
   const logoTimeoutRef = useRef(null);
+  const logoClickTimeoutRef = useRef(null);
 
   useEffect(() => {
     const usuario = searchParams?.get('usuario');
@@ -60,6 +71,7 @@ function LoginContent() {
   useEffect(() => {
     return () => {
       if (logoTimeoutRef.current) window.clearTimeout(logoTimeoutRef.current);
+      if (logoClickTimeoutRef.current) window.clearTimeout(logoClickTimeoutRef.current);
     };
   }, []);
 
@@ -83,6 +95,33 @@ function LoginContent() {
     resetLogoEasterEgg();
   }
 
+  function handleLogoClick() {
+    setLogoClickCount((prev) => {
+      const nextCount = prev + 1;
+      if (nextCount >= 3) {
+        setShowAdminLogin(true);
+        setAdminError('');
+        setLogoClickCount(0);
+        if (logoClickTimeoutRef.current) {
+          window.clearTimeout(logoClickTimeoutRef.current);
+          logoClickTimeoutRef.current = null;
+        }
+        return 0;
+      }
+
+      if (logoClickTimeoutRef.current) {
+        window.clearTimeout(logoClickTimeoutRef.current);
+      }
+
+      logoClickTimeoutRef.current = window.setTimeout(() => {
+        setLogoClickCount(0);
+        logoClickTimeoutRef.current = null;
+      }, 2000);
+
+      return nextCount;
+    });
+  }
+
   function handleTelefoneChange(event) {
     setTelefone(formatPhone(event.target.value));
   }
@@ -99,6 +138,54 @@ function LoginContent() {
     setTelefone('');
     setDataNascimento('');
     setErrorMessage('');
+  }
+
+  async function handleAdminSubmit(e) {
+    e.preventDefault();
+    setAdminError('');
+    setAdminLoading(true);
+
+    try {
+      if (!adminEmail || !adminPassword) {
+        throw new Error('Por favor, preencha email e senha do administrador.');
+      }
+
+      const response = await fetch(API_ADMIN_LOGIN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email: adminEmail, senha: adminPassword }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        console.error('Admin login failed', response.status, data);
+        const message = data?.error || data?.message || `Erro de backend ${response.status}`;
+        throw new Error(message);
+      }
+
+      const { token, user } = data;
+      if (!token) {
+        throw new Error('Resposta inesperada do servidor. Tente novamente.');
+      }
+
+      localStorage.removeItem('token');
+      localStorage.removeItem('authToken');
+      localStorage.setItem('token', token);
+      localStorage.setItem('authToken', token);
+      localStorage.setItem('authUser', 'admin');
+      setMensagemBemVindo('Bem-vindo, Administrador! Redirecionando para o painel...');
+      setExibirBemVindo(true);
+
+      setTimeout(() => {
+        router.push('/admin');
+      }, 1200);
+    } catch (error) {
+      setAdminError(error?.message || 'Não foi possível conectar ao servidor. Tente novamente.');
+    } finally {
+      setAdminLoading(false);
+    }
   }
 
   async function handleSubmit(e) {
@@ -173,22 +260,56 @@ function LoginContent() {
         return;
       }
 
-      const { token } = data;
+      const { token, user } = data;
       if (!token) {
         setErrorMessage('Resposta inesperada do servidor. Tente novamente mais tarde.');
         return;
       }
 
+      // Salva token no localStorage
       localStorage.removeItem('token');
       localStorage.removeItem('authToken');
       localStorage.setItem('token', token);
       localStorage.setItem('authToken', token);
+
+      // Tenta determinar o role: primeiro pelo objeto user retornado, depois pelo payload do JWT
+      let role = user?.role || user?.tipo || user?.roleName;
+      try {
+        const parts = token.split('.');
+        if (parts.length === 3) {
+          const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(
+            atob(base64)
+              .split('')
+              .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+              .join('')
+          );
+          const payload = JSON.parse(jsonPayload);
+          role = role || payload.role || payload?.roles || payload?.roleName;
+        }
+      } catch (e) {
+        // não crítico — seguimos com o que temos
+      }
+
+      const isAdmin = role && String(role).toLowerCase() === 'admin';
+
+      if (isAdmin) {
+        localStorage.setItem('authUser', 'admin');
+        setMensagemBemVindo('Bem-vindo, Administrador! Redirecionando para o painel...');
+        setExibirBemVindo(true);
+        setTimeout(() => {
+          router.push('/admin');
+        }, 1200);
+        return;
+      }
+
+      // default: nutricionista
       localStorage.setItem('authUser', 'nutricionista');
       setMensagemBemVindo('Bem-vindo à ferramenta que facilita a vida de seus pacientes! Carregando sua plataforma...');
       setExibirBemVindo(true);
       setTimeout(() => {
         router.push('/nutricionista/dashboard');
-      }, 2000);
+      }, 1200);
       return;
     } catch (error) {
       setErrorMessage(error?.message || 'Não foi possível conectar ao servidor. Tente novamente.');
@@ -283,6 +404,7 @@ function LoginContent() {
 
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <div
+            onClick={handleLogoClick}
             onMouseEnter={handleLogoMouseEnter}
             onMouseLeave={handleLogoMouseLeave}
             className="relative inline-flex items-center justify-center"
@@ -340,20 +462,40 @@ function LoginContent() {
                 disabled={loading}
               />
 
-              <input
-                placeholder="Senha"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: 12,
-                  marginBottom: 20,
-                  borderRadius: 10,
-                  border: '1px solid #ccc',
-                }}
-                disabled={loading}
-              />
+              <div style={{ position: 'relative', marginBottom: 20 }}>
+                <input
+                  placeholder="Senha"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 80px 12px 12px',
+                    borderRadius: 10,
+                    border: '1px solid #ccc',
+                  }}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  style={{
+                    position: 'absolute',
+                    right: 12,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#2563EB',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    padding: '4px 8px',
+                  }}
+                >
+                  {showPassword ? 'Ocultar' : 'Mostrar'}
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -439,6 +581,143 @@ function LoginContent() {
           </button>
         </div>
       </div>
+
+      {showAdminLogin && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 999,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 420,
+              background: '#fff',
+              borderRadius: 20,
+              padding: 24,
+              boxShadow: '0 30px 75px rgba(0,0,0,0.18)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 18,
+              }}
+            >
+              <div>
+                <p style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Login Admin</p>
+                <p style={{ margin: '6px 0 0', fontSize: 13, color: '#555' }}>
+                  Clique 3 vezes na logo para abrir este acesso.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdminLogin(false)}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  fontSize: 22,
+                  cursor: 'pointer',
+                  color: '#666',
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleAdminSubmit}>
+              <input
+                placeholder="Email do Administrador"
+                type="email"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: 12,
+                  marginBottom: 10,
+                  borderRadius: 10,
+                  border: '1px solid #ccc',
+                }}
+                disabled={adminLoading}
+              />
+              <div style={{ position: 'relative', marginBottom: 16 }}>
+                <input
+                  placeholder="Senha do Administrador"
+                  type={showAdminPassword ? 'text' : 'password'}
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 110px 12px 12px',
+                    borderRadius: 10,
+                    border: '1px solid #ccc',
+                  }}
+                  disabled={adminLoading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAdminPassword((prev) => !prev)}
+                  style={{
+                    position: 'absolute',
+                    right: 12,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#2563EB',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    padding: '4px 8px',
+                  }}
+                >
+                  {showAdminPassword ? 'Ocultar' : 'Mostrar'}
+                </button>
+              </div>
+
+              {adminError && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: 12,
+                    borderRadius: 10,
+                    background: '#FFEAEA',
+                    color: '#A41C1C',
+                    border: '1px solid #F5C2C2',
+                  }}
+                >
+                  {adminError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={adminLoading}
+                style={{
+                  width: '100%',
+                  padding: 12,
+                  borderRadius: 12,
+                  background: adminLoading ? '#96D6A5' : '#3AAB59',
+                  color: '#fff',
+                  border: 'none',
+                  cursor: adminLoading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {adminLoading ? 'Autenticando admin...' : 'Entrar como Administrador'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
       <style jsx>{`
         @keyframes frameShow1 {
           0%, 24.99% { opacity: 1; }

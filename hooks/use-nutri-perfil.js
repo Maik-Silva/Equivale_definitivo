@@ -19,6 +19,7 @@ function normalizePerfil(data) {
     instagram: data?.instagram || '',
     logo: logoUrl,
     logo_url: logoUrl,
+    bloquear_grupos_diferentes: data?.bloquear_grupos_diferentes ?? false,
   };
 }
 
@@ -72,6 +73,7 @@ export function useNutriPerfil() {
       instagram: '',
       logo: '',
       logo_url: '',
+      bloquear_grupos_diferentes: false,
     };
   });
 

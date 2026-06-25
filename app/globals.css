@@ -89,12 +89,23 @@
   .animate-float {
     animation: float-soft 6s ease-in-out infinite;
   }
+  .animate-soft-pulse {
+    animation: pulse-soft 2.8s ease-in-out infinite;
+  }
   @keyframes float-soft {
     0%, 100% {
       transform: translateY(0px);
     }
     50% {
       transform: translateY(-12px);
+    }
+  }
+  @keyframes pulse-soft {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.80;
     }
   }
   .text-eyebrow {

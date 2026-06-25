@@ -13,6 +13,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { useNutriPerfil } from '@/hooks/use-nutri-perfil';
 import { Toaster } from '@/components/ui/toaster';
+import { EquivalenciaSecurityModal } from '@/components/equivalencia-security-modal';
+import { verificarEquivalencia, formatarQuantidade } from '@/lib/api-equivalencia';
 
 const defaultBrand = {
   nome: 'Nutricionista',
@@ -179,8 +181,14 @@ export default function EquivalePage() {
   const [suggestionSubmitted, setSuggestionSubmitted] = useState(false);
   const baseTimer = useRef(null);
   const substituteTimer = useRef(null);
+  
+  // Estados para o modal de segurança
+  const [securityModalOpen, setSecurityModalOpen] = useState(false);
+  const [securityMessage, setSecurityMessage] = useState('');
+  const [pendingEquivalenceData, setPendingEquivalenceData] = useState(null);
+  const [confirmingEquivalence, setConfirmingEquivalence] = useState(false);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '');
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'https://backend-production-e77b.up.railway.app';
   const { perfil } = useNutriPerfil();
 
   useEffect(() => {
@@ -256,14 +264,20 @@ export default function EquivalePage() {
   function formatQuantity(amount) {
     if (amount == null) return '';
     if (typeof amount === 'number') {
-      return `${Number(amount).toFixed(amount % 1 === 0 ? 0 : 2)}g`;
+      return `${Number(amount).toFixed(2)}g`;
     }
     const raw = amount.toString().trim().replace(/g$/i, '').replace(',', '.');
     const value = Number(raw);
     if (!Number.isNaN(value)) {
-      return `${value.toFixed(value % 1 === 0 ? 0 : 2)}g`;
+      return `${value.toFixed(2)}g`;
     }
     return `${raw}g`;
+  }
+
+  function buildSystemSecurityNotice(baseFood, substituteFood, baseGroup, substituteGroup) {
+    // Reuse the same clinical warning used elsewhere to keep messaging consistent
+    if (!baseGroup || !substituteGroup) return '';
+    return buildGroupWarning(baseFood, substituteFood, baseGroup, substituteGroup);
   }
 
   function getResponseText(payload) {
@@ -348,58 +362,176 @@ export default function EquivalePage() {
     setGroupWarning('');
 
     try {
-      const url = new URL(`${apiUrl}/api/equivalencia`);
-      url.searchParams.set('baseFood', baseFood.trim());
-      url.searchParams.set('substituteFood', substituteFood.trim());
-      url.searchParams.set('baseQuantity', quantity.trim());
+      // Chama a nova API unificada
+      const response = await verificarEquivalencia(
+        baseFood.trim(),
+        substituteFood.trim(),
+        quantity.trim()
+      );
 
-      const response = await fetch(url.toString());
-      if (!response.ok) {
-        const errorText = await response.text();
-        toast({ title: 'Erro na API', description: errorText || 'Falha ao calcular a equivalência.' });
+      setLastPayload(response.raw);
+      console.debug('Equivale payload:', response.raw);
+
+      const hasDifferentGroups =
+        response.gruposDiferentes === true ||
+        response.equivalencia?.gruposDiferentes === true ||
+        response.raw?.gruposDiferentes === true ||
+        response.raw?.grupo_diferente === true ||
+        response.raw?.isDifferentGroup === true ||
+        response.raw?.groupMismatch === true;
+
+      if (hasDifferentGroups) {
+        const fields = extractGroupFields(response.raw || response);
+        setPendingEquivalenceData({
+          baseFood: baseFood.trim(),
+          substituteFood: substituteFood.trim(),
+          quantity: quantity.trim(),
+          response,
+        });
+        setSecurityMessage(
+          buildSystemSecurityNotice(
+            baseFood.trim(),
+            substituteFood.trim(),
+            fields.baseGroup,
+            fields.substituteGroup
+          ) || response.mensagem || response.message || 'Confirme a equivalência para prosseguir.'
+        );
+        setSecurityModalOpen(true);
         return;
       }
 
-      const payload = await response.json();
-      // store payload for debugging / inspection
-      setLastPayload(payload);
-      console.debug('Equivale payload:', payload);
-      const responseText = getResponseText(payload);
-      const warning = getGroupWarning(payload);
-      const equivalentQuantity = getEquivalentQuantity(payload);
-      const formattedEquivalentQuantity = equivalentQuantity ? formatQuantity(equivalentQuantity) : '';
-
-      setResultText(responseText || `Resultado calculado para ${quantity.trim()}g de ${baseFood.trim()}.`);
-      setGroupWarning(warning);
-
-      const newEntry = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        date: new Date().toLocaleString('pt-BR', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        baseFood: baseFood.trim(),
-        baseQuantity: quantity.trim(),
-        substituteFood: substituteFood.trim(),
-        equivalentQuantity: formattedEquivalentQuantity,
-      };
-
-      setHistorico((current) => {
-        const next = [newEntry, ...current].slice(0, 20);
-        try {
-          localStorage.setItem('historicoEquivalencias', JSON.stringify(next));
-        } catch (error) {
-          console.warn('Não foi possível salvar o histórico no localStorage:', error);
-        }
-        return next;
-      });
+      processEquivalenceResult(response);
+      return;
     } catch (error) {
-      toast({ title: 'Erro', description: 'Não foi possível calcular a equivalência.' });
+      console.error('Erro ao verificar equivalência:', error);
+      toast({
+        title: 'Erro',
+        description: error.message || 'Não foi possível verificar a equivalência.',
+      });
     } finally {
       setLoadingEquivalence(false);
+    }
+  }
+
+  function processEquivalenceResult(response) {
+    const responseText = extractResponseText(response);
+    const warning = extractWarning(response);
+    const raw = response?.raw || response;
+    const equivalentQuantity = response.equivalencia?.quantidade || raw?.equivalentQuantity || raw?.equivalent_quantity || raw?.amount || null;
+    const formattedEquivalentQuantity = equivalentQuantity 
+      ? formatarQuantidade(equivalentQuantity) 
+      : '';
+
+    setResultText(responseText || `Resultado calculado para ${quantity.trim()}g de ${baseFood.trim()}.`);
+    setGroupWarning(warning);
+
+    const newEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      date: new Date().toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      baseFood: baseFood.trim(),
+      baseQuantity: quantity.trim(),
+      substituteFood: substituteFood.trim(),
+      equivalentQuantity: formattedEquivalentQuantity,
+    };
+
+    setHistorico((current) => {
+      const next = [newEntry, ...current].slice(0, 20);
+      try {
+        localStorage.setItem('historicoEquivalencias', JSON.stringify(next));
+      } catch (error) {
+        console.warn('Não foi possível salvar o histórico no localStorage:', error);
+      }
+      return next;
+    });
+  }
+
+  function extractResponseText(response) {
+    if (!response) return '';
+    const raw = response.raw || response;
+    // Prefer to build a clear equivalence sentence when possible
+    const equivalencia = response.equivalencia || raw.equivalent || raw.equivalente || raw;
+    const amount = equivalencia?.quantidade || raw?.equivalentQuantity || raw?.equivalent_quantity || raw?.amount || raw?.quantidade || raw?.quantidade_equivalente || raw?.equivalent || null;
+    const substitute = equivalencia?.alimento_substituto || equivalencia?.substituto || equivalencia?.substituicao || equivalencia?.alimento || equivalencia?.substitute || raw?.substituteFood || raw?.substitute_food || raw?.substitute || raw?.alimento_substituto || raw?.substituto || raw?.alimento || null;
+
+    if (amount && substitute) {
+      const formattedAmount = formatarQuantidade(amount);
+      return `${quantity.trim()}g de ${baseFood.trim()} equivale a ${formattedAmount} de ${substitute}.`;
+    }
+
+    // Fallback to any explicit textual message provided by the API
+    if (raw.result) return raw.result;
+    if (raw.message) return raw.message;
+    if (raw.mensagem) return raw.mensagem;
+    if (raw.text) return raw.text;
+
+    return `Não foi possível interpretar o resultado. Verifique os dados e tente novamente.`;
+  }
+
+  function extractWarning(response) {
+      if (!response) return '';
+      const raw = response.raw || response;
+
+      // Prefer our structured/group warning first so we don't echo full API messages
+      const groupWarn = getGroupWarning(raw);
+      if (groupWarn) return groupWarn;
+
+      // If API provides avisos array, try to sanitize the first entry
+      if (response.avisos?.length > 0) {
+        return sanitizeWarning(response.avisos[0]);
+      }
+
+      if (raw.warning) return sanitizeWarning(raw.warning);
+      if (raw.aviso) return sanitizeWarning(raw.aviso);
+      if (raw.mensagem && raw.bloqueado) return sanitizeWarning(raw.mensagem);
+
+      return '';
+  }
+
+    // Remove parts of API warnings that repeat the numeric equivalence/result
+    function sanitizeWarning(text) {
+      if (!text || typeof text !== 'string') return text || '';
+    // Split into sentences using a safe regex and drop those mentioning equivalence/result
+    const sentences = text.match(/[^.!?]+[.!?]?/g) || [text];
+    const filtered = sentences.map(s => s.trim()).filter((p) => !/resultado|equivalente|equivale|resultado equivalente|A troca/i.test(p));
+    }
+
+  async function handleSecurityConfirm() {
+    if (!pendingEquivalenceData) return;
+
+    setConfirmingEquivalence(true);
+    try {
+      // 🟢 CORREÇÃO: Reenvia o cálculo para o servidor indicando confirmação explícita
+      const response = await verificarEquivalencia(
+        pendingEquivalenceData.baseFood,
+        pendingEquivalenceData.substituteFood,
+        pendingEquivalenceData.quantity,
+        true
+      );
+
+      setLastPayload(response.raw);
+      processEquivalenceResult(response);
+
+      toast({
+        title: 'Trava de segurança confirmada',
+        description: 'A substituição foi autorizada e validada com sucesso.',
+      });
+
+      setSecurityModalOpen(false);
+      setPendingEquivalenceData(null);
+    } catch (error) {
+      console.error('Erro ao confirmar equivalência no servidor:', error);
+      toast({
+        title: 'Erro na confirmação',
+        description: error.message || 'O servidor não aceitou a confirmação.',
+      });
+    } finally {
+      setConfirmingEquivalence(false);
     }
   }
 
@@ -441,6 +573,15 @@ export default function EquivalePage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <Toaster />
+      <EquivalenciaSecurityModal
+        open={securityModalOpen}
+        onOpenChange={setSecurityModalOpen}
+        message={securityMessage}
+        onConfirm={handleSecurityConfirm}
+        isLoading={confirmingEquivalence}
+        alimentoBase={pendingEquivalenceData?.baseFood}
+        alimentoSubstituto={pendingEquivalenceData?.substituteFood}
+      />
       <header className="border-b border-slate-200 bg-white">
         <div className="container mx-auto flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
@@ -465,14 +606,14 @@ export default function EquivalePage() {
           <BackButton href="/nutricionista/dashboard" />
         </div>
         <div className="mx-auto w-full max-w-5xl">
-          <div className="space-y-8">
-            <section className="w-full rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
-              <div className="grid gap-6">
-                <div className="flex flex-col items-center gap-4 text-center">
+          <div className="space-y-6">
+            <section className="w-full rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+              <div className="grid gap-4">
+                <div className="flex flex-col items-center gap-3 text-center">
                   {(brand.logo || brand.logo_url) ? (
-                    <img src={brand.logo || brand.logo_url} alt="Logo do nutricionista" className="mx-auto h-24 w-24 rounded-3xl border border-slate-200 object-contain bg-slate-50 p-3" />
+                    <img src={brand.logo || brand.logo_url} alt="Logo do nutricionista" className="mx-auto h-[7.5rem] w-[7.5rem] rounded-3xl border border-slate-200 object-contain bg-slate-50 p-3" />
                   ) : (
-                    <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-3xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-500">
+                    <div className="mx-auto flex h-[7.5rem] w-[7.5rem] items-center justify-center rounded-3xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-500">
                       LOGO
                     </div>
                   )}
@@ -537,11 +678,11 @@ export default function EquivalePage() {
                   </div>
                 </form>
 
-                <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-6">
+                <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-4">
                   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Resultado</p>
-                  <div className="mt-4">
+                  <div className="mt-3">
                     {resultText ? (
-                      <div className="rounded-3xl border border-slate-200 bg-white p-5 text-slate-900 shadow-sm">
+                      <div className="rounded-3xl border border-slate-200 bg-white p-4 text-slate-900 shadow-sm">
                         <p className="text-base leading-7 font-semibold tracking-tight text-slate-900 sm:text-lg">{resultText}</p>
                       </div>
                     ) : (
@@ -576,7 +717,7 @@ export default function EquivalePage() {
                               <p className="text-gray-700">
                                 <span className="font-semibold text-gray-900">{item.baseQuantity}g</span> de {item.baseFood}{' '}
                                 <span className="text-gray-400">-&gt;</span>{' '}
-                                <span className="font-bold text-emerald-600">{item.equivalentQuantity}g</span> de {item.substituteFood}
+                                <span className="font-bold text-emerald-600">{item.equivalentQuantity}</span> de {item.substituteFood}
                               </p>
                             </div>
                           ))
@@ -604,13 +745,13 @@ export default function EquivalePage() {
                   </div>
                 </div>
 
-                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-6">
+                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4">
                   <div className="space-y-2">
                     <p className="text-base font-semibold text-slate-900">Não encontrou o alimento?</p>
                     <p className="text-sm text-slate-600">Envie sua sugestão para que possamos ampliar o catálogo do Equivale.</p>
                   </div>
 
-                  <form onSubmit={handleSuggestionSubmit} className="mt-6 space-y-4">
+                  <form onSubmit={handleSuggestionSubmit} className="mt-4 space-y-3">
                     <div className="space-y-2">
                       <label htmlFor="sugestao-nome" className="text-sm font-semibold text-slate-700">Alimento sugerido</label>
                       <Input
@@ -639,29 +780,18 @@ export default function EquivalePage() {
                 </div>
               </div>
             </section>
+            {(brand.crn || brand.whatsapp || brand.instagram) ? (
+              <div className="mx-auto mt-8 max-w-5xl text-center text-sm text-slate-600">
+                {brand.crn ? <p className="font-medium text-slate-700">{formatCrn(brand.crn)}</p> : null}
+                <div className="mt-2 space-y-1">
+                  {brand.whatsapp ? <p>WhatsApp: {brand.whatsapp}</p> : null}
+                  {brand.instagram ? <p>Instagram: {brand.instagram}</p> : null}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </main>
-
-      <footer className="border-t border-slate-200 bg-white py-8">
-        <div className="container mx-auto flex flex-col gap-6 px-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            {(brand.logo || brand.logo_url) ? (
-              <img src={brand.logo || brand.logo_url} alt="Logo do nutricionista" className="h-14 w-14 rounded-3xl object-contain bg-slate-50 p-3" />
-            ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500">LOGO</div>
-            )}
-            <div className="text-sm text-slate-700">
-              <p className="font-semibold text-slate-900">{brand.nome}</p>
-              {formatCrn(brand.crn) ? <p>{formatCrn(brand.crn)}</p> : null}
-            </div>
-          </div>
-          <div className="grid gap-1 text-sm text-slate-600 sm:text-right">
-            {brand.whatsapp ? <p>WhatsApp: {brand.whatsapp}</p> : null}
-            {brand.instagram ? <p>Instagram: {brand.instagram}</p> : null}
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

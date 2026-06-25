@@ -68,12 +68,6 @@ export default function HomePage() {
         </div>
       </main>
 
-      <footer className="border-t border-brand-dark/10 bg-white/90">
-        <div className="container mx-auto px-4 py-6 text-sm text-brand-dark/70">
-          <p>© Equivale</p>
-          <p>Plataforma para nutricionistas.</p>
-        </div>
-      </footer>
     </div>
   );
 }

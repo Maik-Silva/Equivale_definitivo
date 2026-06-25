@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Toaster } from '@/components/ui/toaster';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import BackButton from '@/components/back-button';
 
@@ -21,6 +22,7 @@ export default function PersonalizarPage() {
     whatsapp: '',
     instagram: '',
     logo_url: '',
+    bloquear_grupos_diferentes: false,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -86,6 +88,7 @@ export default function PersonalizarPage() {
         whatsapp: data?.whatsapp || '',
         instagram: data?.instagram || '',
         logo_url: data?.logo_url || '',
+        bloquear_grupos_diferentes: !!data?.bloquear_grupos_diferentes,
       };
       setForm(initialForm);
       localStorage.setItem(
@@ -98,6 +101,7 @@ export default function PersonalizarPage() {
           instagram: initialForm.instagram,
           logo: initialForm.logo_url,
           logo_url: initialForm.logo_url,
+          bloquear_grupos_diferentes: initialForm.bloquear_grupos_diferentes,
         })
       );
     } catch (error) {
@@ -128,6 +132,7 @@ export default function PersonalizarPage() {
         instagram: updatedForm.instagram || '',
         logo: updatedForm.logo_url || updatedForm.logo || '',
         logo_url: updatedForm.logo_url || updatedForm.logo || '',
+        bloquear_grupos_diferentes: updatedForm.bloquear_grupos_diferentes ?? false,
       })
     );
   }
@@ -270,7 +275,10 @@ export default function PersonalizarPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          bloquear_grupos_diferentes: !!form.bloquear_grupos_diferentes,
+        }),
       });
 
       const data = await parseJsonResponse(response);
@@ -288,6 +296,7 @@ export default function PersonalizarPage() {
         whatsapp: data?.whatsapp || form.whatsapp,
         instagram: data?.instagram || form.instagram,
         logo_url: data?.logo_url || form.logo_url,
+        bloquear_grupos_diferentes: data?.bloquear_grupos_diferentes ?? !!form.bloquear_grupos_diferentes,
       };
 
       setForm(savedForm);
@@ -397,6 +406,25 @@ export default function PersonalizarPage() {
                       value={form.instagram}
                       onChange={handleChange}
                       placeholder="@seunome"
+                      disabled={loading || saving}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">Bloquear substituições de grupos diferentes para meus pacientes</p>
+                      <p className="text-sm text-slate-500">Quando ativo, o paciente será avisado ou bloqueado conforme sua configuração.</p>
+                    </div>
+                    <Switch
+                      checked={form.bloquear_grupos_diferentes}
+                      onCheckedChange={(checked) =>
+                        setForm((current) => ({
+                          ...current,
+                          bloquear_grupos_diferentes: checked,
+                        }))
+                      }
                       disabled={loading || saving}
                     />
                   </div>
