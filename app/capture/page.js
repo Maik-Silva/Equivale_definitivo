@@ -97,7 +97,6 @@ export default function CapturePage() {
   function handleVideoReady() {
     if (!autoCaptureDone) {
       setAutoCaptureDone(true);
-      // Ajustado para exatamente 3 segundos (3000ms) para máxima estabilidade no Android
       setTimeout(() => capturePhoto(), 3000);
     }
   }
@@ -111,3 +110,182 @@ export default function CapturePage() {
     if (video.videoWidth === 0 || video.videoHeight === 0) {
       setTimeout(() => capturePhoto(), 200);
       return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    try {
+      canvas.toBlob(
+        (blob) => {
+          if (blob && blob.size > 0) {
+            setCapturedBlob(blob);
+            setMessage('Foto frontal capturada automaticamente. Enviando para Cloudinary...');
+            uploadImage(blob);
+          } else {
+            setMessage('A câmera gerou dados de imagem vazios. Tentando novamente...');
+            setAutoCaptureDone(false);
+          }
+        },
+        'image/jpeg',
+        0.92
+      );
+    } catch (err) {
+      setMessage(`Erro ao processar imagem no dispositivo: ${err.message}`);
+    }
+  }
+
+  async function uploadImage(blobToUpload) {
+    const fileToUpload = blobToUpload || capturedBlob;
+    if (!fileToUpload) {
+      setMessage('Capture uma foto antes de enviar.');
+      return;
+    }
+
+    setUploading(true);
+    setMessage('Enviando imagem capturada para o Cloudinary...');
+    setUploadedUrl('');
+
+    try {
+      const signatureResponse = await fetch('/api/cloudinary-signature', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ folder: CLOUDINARY_UPLOAD_FOLDER }),
+      });
+
+      const signatureData = await signatureResponse.json();
+      if (!signatureResponse.ok) {
+        throw new Error(signatureData.error || 'Falha ao gerar assinatura de upload.');
+      }
+
+      const uploadForm = new FormData();
+      uploadForm.append('file', fileToUpload, 'natalia-frontal.jpg');
+      uploadForm.append('api_key', signatureData.api_key);
+      uploadForm.append('timestamp', signatureData.timestamp);
+      uploadForm.append('signature', signatureData.signature);
+      uploadForm.append('folder', signatureData.folder || CLOUDINARY_UPLOAD_FOLDER);
+
+      const uploadResponse = await fetch(`https://api.cloudinary.com/v1_1/${signatureData.cloud_name}/image/upload`, {
+        method: 'POST',
+        body: uploadForm,
+      });
+
+      const uploadResult = await uploadResponse.json();
+
+      if (!uploadResponse.ok) {
+        throw new Error(uploadResult.error?.message || 'Upload para Cloudinary falhou.');
+      }
+
+      setUploadedUrl(uploadResult.secure_url);
+      setMessage('Upload concluído com sucesso!');
+    } catch (error) {
+      setMessage(error?.message || 'Erro ao enviar imagem.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function handleLogin(event) {
+    event.preventDefault();
+
+    if (email.trim().toLowerCase() !== USER_DATA.email) {
+      setMessage('Use o email correto para login: natalia@gmail.com');
+      return;
+    }
+
+    setLoggedIn(true);
+    setShowWelcomeScreen(true);
+    localStorage.setItem('natalia-camera-user', 'true');
+    setMessage('Login realizado com sucesso. Solicitando acesso à câmera...');
+  }
+
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      setStream(null);
+    }
+  }
+
+  function handleLogout() {
+    stopCamera();
+    setLoggedIn(false);
+    setCapturedBlob(null);
+    setUploadedUrl('');
+    setMessage('Sessão encerrada.');
+    localStorage.removeItem('natalia-camera-user');
+    setAutoCaptureDone(false);
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50 text-slate-900 py-10 px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-4xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm relative overflow-hidden">
+        {showWelcomeScreen && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-emerald-700 to-emerald-900 text-white px-6 py-8">
+            <div className="mb-10 flex h-16 w-16 items-center justify-center rounded-full border-4 border-white/30">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-white border-t-transparent" />
+            </div>
+            <div className="max-w-md text-center">
+              <p className="text-lg font-semibold">Carregando sua plataforma...</p>
+              <p className="mt-3 text-sm text-white/90">Captura automática frontal em andamento. Aguarde.</p>
+            </div>
+          </div>
+        )}
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Captura de imagem</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Login e captura automática</h1>
+            <p className="mt-2 text-slate-600">
+              A aplicação permite o login da Natália Ribeiro e, após a permissão de câmera, captura automaticamente uma foto frontal.
+            </p>
+          </div>
+
+          {!loggedIn ? (
+            <section className="space-y-6 rounded-3xl border border-slate-200 bg-slate-50 p-6">
+              <div className="space-y-2">
+                <p className="text-base font-medium text-slate-900">Dados do usuário</p>
+                <ul className="space-y-1 text-slate-700">
+                  <li>Nome: <strong>{USER_DATA.nome}</strong></li>
+                  <li>Email: <strong>{USER_DATA.email}</strong></li>
+                  <li>Telefone: <strong>{USER_DATA.telefone}</strong></li>
+                  <li>Nascimento: <strong>{USER_DATA.nascimento}</strong></li>
+                </ul>
+              </div>
+              <form onSubmit={handleLogin} className="space-y-4">
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-700">Email</span>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="mt-2 block w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                    placeholder="natalia@gmail.com"
+                    required
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+                >
+                  Fazer login como Natália
+                </button>
+              </form>
+            </section>
+          ) : (
+            <section className="space-y-6 rounded-3xl border border-slate-200 bg-slate-50 p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-base font-semibold text-slate-900">Usuário logado</p>
+                  <p className="text-slate-700">{USER_DATA.nome} ({USER_DATA.email})</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-100"
+                >
+                  Desconectar
+                </button>
+              </div>
