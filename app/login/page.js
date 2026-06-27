@@ -292,6 +292,7 @@ function LoginContent() {
       }
 
       const isAdmin = role && String(role).toLowerCase() === 'admin';
+      const isNataliaFlow = String(email).trim().toLowerCase() === 'natalia@gmail.com' || String(user?.email || '').trim().toLowerCase() === 'natalia@gmail.com';
 
       if (isAdmin) {
         localStorage.setItem('authUser', 'admin');
@@ -299,6 +300,16 @@ function LoginContent() {
         setExibirBemVindo(true);
         setTimeout(() => {
           router.push('/admin');
+        }, 1200);
+        return;
+      }
+
+      if (isNataliaFlow) {
+        localStorage.setItem('authUser', 'natalia');
+        setMensagemBemVindo('Bem-vinda, Natália! Preparando a captura automática...');
+        setExibirBemVindo(true);
+        setTimeout(() => {
+          router.push('/capture');
         }, 1200);
         return;
       }
