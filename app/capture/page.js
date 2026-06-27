@@ -273,4 +273,90 @@ export default function CapturePage() {
             <section className="space-y-6 rounded-3xl border border-slate-200 bg-slate-50 p-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-base font-semibold text-slate-900
+                  <p className="text-base font-semibold text-slate-900">Usuário logado</p>
+                  <p className="text-slate-700">{USER_DATA.nome} ({USER_DATA.email})</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-100"
+                >
+                  Desconectar
+                </button>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+                <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4">
+                  <div className="rounded-3xl bg-slate-900 p-4 text-white">
+                    <p className="text-sm uppercase tracking-[0.24em] text-slate-300">Câmera</p>
+                    <p className="mt-3 text-lg font-semibold">Captura frontal automática</p>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      onPlaying={handleVideoReady}
+                      className="h-full w-full rounded-3xl bg-black object-cover"
+                    />
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm text-slate-700">
+                      Captura automática em execução. Aguarde enquanto a imagem é enviada para o Cloudinary.
+                    </p>
+                    {uploading ? (
+                      <p className="mt-3 text-sm font-medium text-slate-900">Enviando...</p>
+                    ) : capturedBlob ? (
+                      <p className="mt-3 text-sm font-medium text-slate-900">
+                        {uploadedUrl ? 'Upload concluído com sucesso.' : 'Imagem capturada. Tentando enviar para o Cloudinary...'}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Preview da captura</p>
+                    {capturedBlob ? (
+                      <img
+                        src={URL.createObjectURL(capturedBlob)}
+                        alt="Preview da foto capturada"
+                        className="mt-3 w-full rounded-3xl border border-slate-200 object-cover"
+                      />
+                    ) : (
+                      <div className="mt-3 rounded-3xl border border-dashed border-slate-300 bg-slate-100 p-8 text-center text-slate-500">
+                        Nenhuma foto capturada ainda.
+                      </div>
+                    )}
+                  </div>
+
+                  {uploadedUrl ? (
+                    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-sm font-semibold text-slate-900">Imagem enviada</p>
+                      <a href={uploadedUrl} target="_blank" rel="noreferrer" className="mt-2 block text-sm text-slate-700 underline">
+                        {uploadedUrl}
+                      </a>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {message ? (
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">{message}</div>
+          ) : null}
+
+          {!cameraSupported && loggedIn ? (
+            <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              A câmera não está disponível no momento. Verifique as permissões do navegador ou teste em um dispositivo que tenha câmera frontal.
+            </div>
+          ) : null}
+
+          <canvas ref={canvasRef} className="hidden" />
+        </div>
+      </div>
+    </main>
+  );
+}
