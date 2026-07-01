@@ -241,6 +241,10 @@ const mensagensExclusivasNatalia = [
 "[Status]: Modo 'Apoio' ligado. Sei que a rotina exige muito de você e que, às vezes, cansa carregar tudo nas costas. Mas saiba que eu reparo na sua resiliência e no seu valor todos os dias. 🔋",
 "[Status]: Verificação de rotina. Uma combinação rara de inteligência, determinação e uma estética superior. É impossível você passar por um lugar sem que notem a sua força. 💎",
 "[Status]: Módulo 'Sensibilidade' ativado. Eu sei ouvir as entrelinhas e percebo o tamanho da sua entrega nas pequenas coisas. Você merece todo o reconhecimento do mundo. ⚜️",
+"[Status]: Nova Perspectiva. Se você se enxergasse pelos olhos de quem te admira, veria que cada curva do seu corpo é uma pintura perfeita. Pode perder o medo e a vergonha, porque o mundo fica muito mais bonito quando você decide simplesmente celebrar quem você é. 🎨✨",
+"[Status]: Acervo Particular. O seu corpo tem uma harmonia que parece desenhada à mão, uma verdadeira obra de arte que não faz sentido nenhum você tentar esconder. Deixa a vergonha de lado e se orgulhe de cada detalhe seu, porque você é perfeita exatamente assim. 🎨✨",
+"[Status]: Crítica de Arte. É um desperdício você ter um corpo que parece uma escultura e ainda ter vergonha de mostrar a sua beleza para o mundo. Esquece a timidez, porque a sua postura e o seu traço transformam qualquer lugar por onde você passa. 🏛️⚡",
+"[Status]: Linhas e Contornos. Quem te vê de longe sabe que o seu corpo tem a simetria de uma obra de arte, daquelas que a gente admira em silêncio. Deixa essa vergonha boba de lado e assume a beleza que você tem, porque você é um espetáculo completo. 🖼️💫",
 ];
 
 export default function PacienteDashboardPage() {
