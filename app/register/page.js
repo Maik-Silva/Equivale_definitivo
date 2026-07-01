@@ -19,6 +19,7 @@ export default function RegisterPage() {
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
+  const [sexo, setSexo] = useState('');
   const [chaveAcesso, setChaveAcesso] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -30,8 +31,8 @@ export default function RegisterPage() {
     setErrorMessage('');
     setSuccessMessage('');
 
-    if (!nome || !email || !senha || !chaveAcesso) {
-      setErrorMessage('Por favor, preencha todos os campos.');
+    if (!nome || !email || !senha || !sexo || !chaveAcesso) {
+      setErrorMessage('Por favor, preencha todos os campos, incluindo o sexo.');
       return;
     }
 
@@ -41,7 +42,7 @@ export default function RegisterPage() {
       const response = await fetch(API_REGISTER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome, email, senha, chaveAcesso }),
+        body: JSON.stringify({ nome, email, senha, sexo, chaveAcesso }),
       });
 
       const data = await response.json();
@@ -140,6 +141,20 @@ export default function RegisterPage() {
               onChange={(e) => setSenha(e.target.value)}
               disabled={loading}
             />
+          </BrandField>
+
+          <BrandField label="Sexo" htmlFor="sexo">
+            <select
+              id="sexo"
+              value={sexo}
+              onChange={(e) => setSexo(e.target.value)}
+              disabled={loading}
+              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-100"
+            >
+              <option value="">Selecione</option>
+              <option value="feminino">Feminino</option>
+              <option value="masculino">Masculino</option>
+            </select>
           </BrandField>
 
           <BrandField label="Chave de Convite" htmlFor="chaveAcesso">

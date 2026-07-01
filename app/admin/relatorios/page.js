@@ -8,12 +8,8 @@ import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts'
 import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://backend-production-e77b.up.railway.app';
-
-function getAdminToken() {
-  if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem('adminToken');
-}
+const { getAdminToken, getAdminApiBaseUrl, getAdminHeaders } = require('@/lib/admin-auth');
+const { normalizeAccess } = require('@/lib/admin-data-normalizers');
 
 function formatDateBR(value) {
   const date = new Date(value);
@@ -25,25 +21,6 @@ function formatDateBR(value) {
     hour: '2-digit',
     minute: '2-digit',
   });
-}
-
-function normalizeAccess(access) {
-  return {
-    id: access.id ?? access._id ?? `${access.patient ?? access.nome_paciente ?? 'desconhecido'}-${access.date ?? access.data_acesso ?? ''}`,
-    patient:
-      access.patient ||
-      access.nome_paciente ||
-      access.nomePaciente ||
-      access.paciente ||
-      'Paciente desconhecido',
-    nutritionist:
-      access.nutritionist ||
-      access.nutricionista ||
-      access.nome_nutricionista ||
-      access.nomeNutri ||
-      'Nutricionista desconhecido',
-    date: access.date || access.data_acesso || access.createdAt || access.created_at || '',
-  };
 }
 
 export default function AdminRelatoriosPage() {
@@ -66,30 +43,32 @@ export default function AdminRelatoriosPage() {
       }
 
       try {
-        const response = await fetch(`${API_BASE.replace(/\/$/, '')}/api/admin/metrics`, {
+        const response = await fetch(`${getAdminApiBaseUrl()}/api/admin/metrics`, {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
+          headers: getAdminHeaders(),
         });
 
-        const body = await response.json();
+        const body = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(body?.message || 'Falha ao carregar métricas.');
         }
 
         const payload = body?.data || body || {};
         setMetrics({
-          totalNutris: payload.totalNutris ?? payload.totalNutris ?? payload.nutricionistas?.length ?? 0,
-          totalPacientes: payload.totalPacientes ?? payload.totalPacientes ?? 0,
-          totalAcessos: payload.totalAcessos ?? payload.totalAcessos ?? 0,
+          totalNutris:
+            payload.totalNutris ?? payload.totalNutricionistas ?? payload.nutricionistas?.length ?? 0,
+          totalPacientes: payload.totalPacientes ?? payload.totalPacientes ?? payload.pacientes?.length ?? 0,
+          totalAcessos: payload.totalAcessos ?? payload.acessos ?? 0,
         });
 
         const logs = Array.isArray(payload.acessosRecentes)
           ? payload.acessosRecentes
+          : Array.isArray(payload.acessos)
+          ? payload.acessos
           : Array.isArray(payload.data?.acessosRecentes)
           ? payload.data.acessosRecentes
+          : Array.isArray(payload.data?.acessos)
+          ? payload.data.acessos
           : [];
 
         setAcessosRecentes(logs.map(normalizeAccess));

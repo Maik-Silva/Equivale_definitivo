@@ -1,14 +1,21 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, Users, Clock, UserCheck, ShieldAlert, MoreHorizontal, Edit3, Eye, Slash } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Activity, Users, UserCheck, ShieldAlert, MoreHorizontal, Edit3, Eye, Slash } from 'lucide-react';
 import { BetaLimitAlert } from '@/components/admin/beta-limit-alert';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import EditNutriModal from '@/components/admin/EditNutriModal';
 
+const { getAdminToken, getAdminApiBaseUrl, getAdminHeaders } = require('@/lib/admin-auth');
+const { getLimitProgressState } = require('@/lib/admin-limit-utils');
+
 function ProgressBar({ value, max }) {
-  const percentage = Math.min(100, Math.round((value / max) * 100));
+  const percentage = Math.min(100, Math.max(0, Math.round((value / max) * 100)));
   return (
     <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-200/80">
       <div
@@ -17,26 +24,6 @@ function ProgressBar({ value, max }) {
       />
     </div>
   );
-}
-
-function getTokenFromStorageOrCookie() {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const possibleKeys = ['adminToken', 'token', 'accessToken'];
-      for (const k of possibleKeys) {
-        const t = localStorage.getItem(k);
-        if (t) return t;
-      }
-    }
-
-    if (typeof document !== 'undefined') {
-      const match = document.cookie.match(/(?:^|; )(?:adminToken|token)=([^;]+)/);
-      if (match) return decodeURIComponent(match[1]);
-    }
-  } catch (e) {
-    // ignore
-  }
-  return null;
 }
 
 function formatDateBR(dateStr) {
@@ -60,11 +47,17 @@ function normalizeName(value) {
 }
 
 export default function AdminDashboardPage() {
+  const router = useRouter();
   const [cards, setCards] = useState({ totalNutris: 0, totalPacientes: 0, totalAcessos: 0 });
   const [nutricionistas, setNutricionistas] = useState([]);
   const [acessosRecentes, setAcessosRecentes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedNutri, setSelectedNutri] = useState(null);
+  const [limitModalOpen, setLimitModalOpen] = useState(false);
+  const [limitTargetNutri, setLimitTargetNutri] = useState(null);
+  const [limitInput, setLimitInput] = useState('');
+  const [changingLimit, setChangingLimit] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -72,23 +65,20 @@ export default function AdminDashboardPage() {
       setLoading(true);
       setError(null);
 
-      const token = getTokenFromStorageOrCookie();
+      const token = getAdminToken();
       if (!token) {
         setError('Token não encontrado. Faça login novamente.');
         setLoading(false);
         return;
       }
 
-      const backend = process.env.NEXT_PUBLIC_API_URL || 'https://backend-production-e77b.up.railway.app';
-      const url = `${backend.replace(/\/$/, '')}/api/admin/metrics`;
+      const backend = getAdminApiBaseUrl();
+      const url = `${backend}/api/admin/metrics`;
 
       try {
         const res = await fetch(url, {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
+          headers: getAdminHeaders(),
         });
 
         if (!mounted) return;
@@ -106,18 +96,18 @@ export default function AdminDashboardPage() {
         }
 
         const data = await res.json();
-        // suporte para { data: { ... } } ou retorno direto
         const payload = data?.data || data || {};
 
         if (payload.cards) setCards(payload.cards);
         if (Array.isArray(payload.nutricionistas)) {
-          // map API fields to local shape: id, nome, email, totalPacientes
           setNutricionistas(
             payload.nutricionistas.map((n) => ({
               id: n.id ?? n._id ?? n.email,
-              nome: n.nome || n.name || n.nome_completo || n.fullName || n.email,
-              email: n.email,
-              totalPacientes: Number(n.totalPacientes ?? n.patients ?? 0),
+              nome: n.nome || n.name || n.nome_completo || n.fullName || n.email || 'Sem nome',
+              email: n.email || 'sem-email@exemplo.com',
+              totalPacientes: Number(n.totalPacientes ?? n.pacientes ?? n.patients ?? 0),
+              limite_pacientes: Number(n.limite_pacientes ?? n.limite ?? n.limitePacientes ?? 5),
+              status: String(n.status || n.estado || 'ativo').toLowerCase(),
             }))
           );
         }
@@ -147,11 +137,9 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
-  const [selectedNutri, setSelectedNutri] = useState(null);
-
   const handleViewPatients = (nutri) => {
     if (!nutri?.id) return;
-    window.location.href = `/admin/usuarios?nutri=${encodeURIComponent(nutri.id)}`;
+    router.push(`/admin/usuarios?nutri=${encodeURIComponent(nutri.id)}`);
   };
 
   const handleSuspend = (nutri) => {
@@ -165,6 +153,53 @@ export default function AdminDashboardPage() {
       )
     );
     setSelectedNutri(null);
+  };
+
+  const handleOpenLimitModal = (nutri) => {
+    setLimitTargetNutri(nutri);
+    setLimitInput(String(nutri?.limite_pacientes ?? 5));
+    setLimitModalOpen(true);
+  };
+
+  const handleCloseLimitModal = () => {
+    setLimitModalOpen(false);
+    setLimitTargetNutri(null);
+    setLimitInput('');
+  };
+
+  const handleUpdateLimit = async (event) => {
+    event.preventDefault();
+    if (!limitTargetNutri?.id) return;
+
+    const nextLimit = Number(limitInput);
+    if (!Number.isFinite(nextLimit) || nextLimit < 1) {
+      setError('Informe um limite válido de pacientes.');
+      return;
+    }
+
+    setChangingLimit(true);
+    try {
+      const response = await fetch(`${getAdminApiBaseUrl()}/api/admin/nutricionistas/${encodeURIComponent(limitTargetNutri.id)}/limite`, {
+        method: 'PUT',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ limite_pacientes: nextLimit }),
+      });
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body?.message || 'Falha ao atualizar o limite de pacientes.');
+      }
+
+      setNutricionistas((current) =>
+        current.map((item) => (item.id === limitTargetNutri.id ? { ...item, limite_pacientes: nextLimit } : item))
+      );
+      handleCloseLimitModal();
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'Erro ao atualizar o limite.');
+    } finally {
+      setChangingLimit(false);
+    }
   };
 
   const metrics = [
@@ -261,50 +296,62 @@ export default function AdminDashboardPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-200 bg-white">
                       {nutricionistas.map((nutri) => {
-                        const patients = nutri.totalPacientes ?? 0;
-                        const isLimitReached = patients >= 5;
+                        const progress = getLimitProgressState(nutri.totalPacientes ?? 0, nutri.limite_pacientes ?? 5);
+                        const progressPercent = Math.min(100, progress.percentage);
+                        const isLimitReached = progress.isLimitReached;
                         return (
-                          <tr key={nutri.id} className="hover:bg-slate-50">
+                          <tr key={nutri.id} className={`hover:bg-slate-50 ${isLimitReached ? 'bg-rose-50/70' : ''}`}>
                             <td className="px-6 py-4 font-medium text-slate-900">{nutri.nome}</td>
                             <td className="px-6 py-4 text-slate-600">{nutri.email}</td>
-                            <td className="px-6 py-4 text-slate-700">{`${patients}/5`}</td>
+                            <td className="px-6 py-4 text-slate-700">{`${progress.totalPacientes}/${progress.limitePacientes}`}</td>
                             <td className="px-6 py-4">
-                              <ProgressBar value={patients} max={5} />
+                              <ProgressBar value={progress.totalPacientes} max={progress.limitePacientes} />
                               <div className="mt-3 flex flex-wrap items-center gap-2">
                                 {isLimitReached ? (
                                   <span className="inline-flex rounded-full bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-700">Limite Atingido</span>
                                 ) : (
                                   <span className="inline-flex rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-700">Espaço disponível</span>
                                 )}
+                                <span className="text-xs text-slate-500">{progressPercent}%</span>
                               </div>
                             </td>
-                            <td className="px-6 py-4 text-right">
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    className="rounded-full border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
-                                    aria-label={`Abrir ações para ${nutri.nome}`}
-                                  >
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="min-w-[12rem]">
-                                  <DropdownMenuItem onSelect={() => setSelectedNutri(nutri)} className="gap-3">
-                                    <Edit3 className="h-4 w-4 text-slate-500" />
-                                    Editar
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onSelect={() => handleViewPatients(nutri)} className="gap-3">
-                                    <Eye className="h-4 w-4 text-slate-500" />
-                                    Ver Pacientes
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onSelect={() => handleSuspend(nutri)} className="gap-3 text-rose-600">
-                                    <Slash className="h-4 w-4 text-rose-500" />
-                                    Suspender
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="rounded-full px-3"
+                                  onClick={() => handleOpenLimitModal(nutri)}
+                                >
+                                  Alterar Limite
+                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className="rounded-full border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                                      aria-label={`Abrir ações para ${nutri.nome}`}
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="min-w-[12rem]">
+                                    <DropdownMenuItem onSelect={() => setSelectedNutri(nutri)} className="gap-3">
+                                      <Edit3 className="h-4 w-4 text-slate-500" />
+                                      Editar
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => handleViewPatients(nutri)} className="gap-3">
+                                      <Eye className="h-4 w-4 text-slate-500" />
+                                      Ver Pacientes
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => handleSuspend(nutri)} className="gap-3 text-rose-600">
+                                      <Slash className="h-4 w-4 text-rose-500" />
+                                      Suspender
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -354,6 +401,42 @@ export default function AdminDashboardPage() {
               nutricionista={selectedNutri}
               onSaved={handleNutriSaved}
             />
+
+            <Dialog open={limitModalOpen} onOpenChange={(open) => { if (!open) handleCloseLimitModal(); }}>
+              <DialogContent className="max-w-lg rounded-[2rem] border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/40">
+                <DialogHeader>
+                  <DialogTitle>Alterar limite de pacientes</DialogTitle>
+                  <DialogDescription className="mt-2 text-sm text-slate-600">
+                    Defina um novo limite para {limitTargetNutri?.nome || 'este nutricionista'}.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <form onSubmit={handleUpdateLimit} className="mt-6 space-y-5">
+                  <div>
+                    <Label htmlFor="limite-pacientes">Novo limite</Label>
+                    <Input
+                      id="limite-pacientes"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={limitInput}
+                      onChange={(event) => setLimitInput(event.target.value)}
+                      className="mt-2"
+                      placeholder="Ex.: 8"
+                    />
+                  </div>
+
+                  <DialogFooter className="justify-end gap-3">
+                    <Button variant="outline" type="button" onClick={handleCloseLimitModal}>
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={changingLimit}>
+                      {changingLimit ? 'Salvando...' : 'Salvar limite'}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
           </>
         )}
       </div>

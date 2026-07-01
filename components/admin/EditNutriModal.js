@@ -14,24 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-function getTokenFromStorageOrCookie() {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const possibleKeys = ['adminToken', 'token', 'accessToken'];
-    for (const key of possibleKeys) {
-      const token = window.localStorage.getItem(key);
-      if (token) return token;
-    }
-
-    const match = document.cookie.match(/(?:^|; )(?:adminToken|token)=([^;]+)/);
-    if (match) return decodeURIComponent(match[1]);
-  } catch (error) {
-    // ignore if storage/cookies are unavailable
-  }
-
-  return null;
-}
+const { getAdminToken, getAdminApiBaseUrl, getAdminHeaders } = require('@/lib/admin-auth');
 
 export default function EditNutriModal({ open, onOpenChange, nutricionista, onSaved }) {
   const [nome, setNome] = useState('');
@@ -55,23 +38,19 @@ export default function EditNutriModal({ open, onOpenChange, nutricionista, onSa
     setLoading(true);
     setError('');
 
-    const token = getTokenFromStorageOrCookie();
+    const token = getAdminToken();
     if (!token) {
       setError('Token não encontrado. Faça login novamente.');
       setLoading(false);
       return;
     }
 
-    const backend = process.env.NEXT_PUBLIC_API_URL || 'https://backend-production-e77b.up.railway.app';
-    const endpoint = `${backend.replace(/\/$/, '')}/api/admin/nutricionistas/${encodeURIComponent(nutricionista.id)}`;
+    const endpoint = `${getAdminApiBaseUrl()}/api/admin/nutricionistas/${encodeURIComponent(nutricionista.id)}`;
 
     try {
       const response = await fetch(endpoint, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ nome, email, status }),
       });
 

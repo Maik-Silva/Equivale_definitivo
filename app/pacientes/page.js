@@ -20,6 +20,7 @@ export default function PacientesPage() {
     email: '',
     telefone: '',
     data_nascimento: '',
+    sexo: '',
     observacoes: '',
   });
   const [patients, setPatients] = useState([]);
@@ -94,7 +95,7 @@ export default function PacientesPage() {
     event.preventDefault();
     setAlert({ type: '', message: '' });
 
-    const missingField = ['nome', 'email', 'telefone', 'data_nascimento'].find(
+    const missingField = ['nome', 'email', 'telefone', 'data_nascimento', 'sexo'].find(
       (field) => !form[field]
     );
 
@@ -149,7 +150,7 @@ export default function PacientesPage() {
         setAlert({ type: 'success', message: 'Paciente cadastrado com sucesso!' });
       }
 
-      setForm({ nome: '', email: '', telefone: '', data_nascimento: '', observacoes: '' });
+      setForm({ nome: '', email: '', telefone: '', data_nascimento: '', sexo: '', observacoes: '' });
       await fetchPatients(token);
     } catch (error) {
       setAlert({ type: 'error', message: error?.message || (editingPatient ? 'Erro ao atualizar paciente.' : 'Erro ao cadastrar paciente.') });
@@ -166,6 +167,7 @@ export default function PacientesPage() {
       email: patient.email || '',
       telefone: patient.telefone || '',
       data_nascimento: dateValue,
+      sexo: patient.sexo || '',
       observacoes: patient.observacoes || '',
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -374,32 +376,49 @@ const urlAcesso = `https://plataformaequivale.netlify.app/login?usuario=${encode
                   </div>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="space-y-2">
-                    <label htmlFor="telefone" className="text-sm font-medium text-slate-700">
-                      Telefone
-                    </label>
-                    <Input
-                      id="telefone"
-                      name="telefone"
-                      value={form.telefone}
-                      onChange={handleChange}
-                      placeholder="(00) 00000-0000"
-                      disabled={submitting}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="data_nascimento" className="text-sm font-medium text-slate-700">
-                      Data de nascimento
-                    </label>
-                    <Input
-                      id="data_nascimento"
-                      name="data_nascimento"
-                      type="date"
-                      value={form.data_nascimento}
-                      onChange={handleChange}
-                      disabled={submitting}
-                    />
+<div className="grid gap-4 lg:grid-cols-3">
+                    <div className="space-y-2">
+                      <label htmlFor="telefone" className="text-sm font-medium text-slate-700">
+                        Telefone
+                      </label>
+                      <Input
+                        id="telefone"
+                        name="telefone"
+                        value={form.telefone}
+                        onChange={handleChange}
+                        placeholder="(00) 00000-0000"
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="data_nascimento" className="text-sm font-medium text-slate-700">
+                        Data de nascimento
+                      </label>
+                      <Input
+                        id="data_nascimento"
+                        name="data_nascimento"
+                        type="date"
+                        value={form.data_nascimento}
+                        onChange={handleChange}
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="sexo" className="text-sm font-medium text-slate-700">
+                        Sexo
+                      </label>
+                      <select
+                        id="sexo"
+                        name="sexo"
+                        value={form.sexo}
+                        onChange={handleChange}
+                        disabled={submitting}
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <option value="">Selecione</option>
+                        <option value="feminino">Feminino</option>
+                        <option value="masculino">Masculino</option>
+                      </select>
                   </div>
                 </div>
 

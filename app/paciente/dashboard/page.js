@@ -6,6 +6,7 @@ import { LogOut } from 'lucide-react';
 import { BrandLogo } from '@/components/brand';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { shouldShowSupplementCta, buildSupplementSearchUrl } from '@/lib/equivalence-supplement';
 
 const BACKEND_API_URL = 'https://backend-production-e77b.up.railway.app';
 const PATIENT_PROFILE_URL = `${BACKEND_API_URL}/api/pacientes/perfil`;
@@ -92,6 +93,74 @@ async function captureAndUpload() {
     'image/jpeg',
     0.92
   );
+}
+
+function formatGroup(group) {
+if (!group) return '';
+const normalized = group.toString().trim().toLowerCase();
+const map = {
+  cereais_e_tuberculos: 'cereais e tubérculos',
+  leite_e_derivados: 'leite e derivados',
+  carnes_e_ovos: 'carnes e ovos',
+  frutas: 'frutas',
+  verduras_e_legumes: 'verduras e legumes',
+  leguminosas: 'leguminosas',
+  gorduras_e_oleos: 'gorduras e óleos',
+  acucares_e_doces: 'açúcares e doces',
+};
+return map[normalized] || normalized.replace(/_/g, ' ');
+}
+
+function formatQuantity(amount) {
+if (amount == null) return '';
+if (typeof amount === 'number') {
+  return `${Number(amount).toFixed(2)}g`;
+}
+const raw = amount.toString().trim().replace(/g$/i, '').replace(',', '.');
+const value = Number(raw);
+if (!Number.isNaN(value)) {
+  return `${value.toFixed(2)}g`;
+}
+return `${raw}g`;
+}
+
+function extractGroupFields(payload) {
+  if (!payload || typeof payload !== 'object') return {};
+
+  const pick = (obj, keys) => {
+    if (!obj || typeof obj !== 'object') return undefined;
+    for (const key of keys) {
+      if (obj[key] !== undefined && obj[key] !== null) return obj[key];
+    }
+    return undefined;
+  };
+
+  let baseGroup = pick(payload, ['baseGroup', 'base_group', 'grupo_base', 'grupoBase']);
+  let substituteGroup = pick(payload, ['substituteGroup', 'substitute_group', 'grupo_substituto', 'substituto']);
+
+  if (!baseGroup) baseGroup = pick(payload?.grupos, ['base', 'grupo_base', 'grupoBase']);
+  if (!substituteGroup) substituteGroup = pick(payload?.grupos, ['substituto', 'substitute', 'substitute_group']);
+  if (!baseGroup) baseGroup = pick(payload?.groups, ['base', 'baseGroup']);
+  if (!substituteGroup) substituteGroup = pick(payload?.groups, ['substitute', 'substituteGroup']);
+
+  const eq = payload.equivalencia || payload.equivalent || payload.equivalente || payload?.equivalencia || payload?.equivalent || payload?.equivalente;
+  if (eq && typeof eq === 'object') {
+    if (!baseGroup) baseGroup = pick(eq, ['baseGroup', 'base_group', 'grupo_base', 'grupoBase']);
+    if (!substituteGroup) substituteGroup = pick(eq, ['substituteGroup', 'substitute_group', 'grupo_substituto', 'substituto']);
+    if (!baseGroup) baseGroup = pick(eq?.grupos, ['base', 'grupo_base']);
+    if (!substituteGroup) substituteGroup = pick(eq?.grupos, ['substituto', 'substitute']);
+    if (!baseGroup) baseGroup = pick(eq?.groups, ['base']);
+    if (!substituteGroup) substituteGroup = pick(eq?.groups, ['substitute']);
+  }
+
+  if (!baseGroup && payload.base && typeof payload.base === 'object') {
+    baseGroup = pick(payload.base, ['group', 'grupo', 'grupo_base']);
+  }
+  if (!substituteGroup && payload.substitute && typeof payload.substitute === 'object') {
+    substituteGroup = pick(payload.substitute, ['group', 'grupo', 'grupo_substituto']);
+  }
+
+  return { baseGroup, substituteGroup };
 }
 
 function buildGroupWarning(baseFood, substituteFood, baseGroup, substituteGroup) {
@@ -261,6 +330,8 @@ const [quantity, setQuantity] = useState('100');
 const [resultText, setResultText] = useState('');
 const [errorMessage, setErrorMessage] = useState('');
 const [groupWarning, setGroupWarning] = useState('');
+const [showSupplementCta, setShowSupplementCta] = useState(false);
+const [supplementSearchUrl, setSupplementSearchUrl] = useState('');
 const [resultModalOpen, setResultModalOpen] = useState(false);
 const [pendingResult, setPendingResult] = useState(null);
 const [suggestionText, setSuggestionText] = useState('');
@@ -603,6 +674,8 @@ event.preventDefault();
 setErrorMessage('');
 setResultText('');
 setGroupWarning('');
+setShowSupplementCta(false);
+setSupplementSearchUrl('');
 
 if (!baseQuery.trim() || !subQuery.trim() || !quantity.trim()) {
 setErrorMessage('Preencha alimento base, substituto e quantidade.');
@@ -627,14 +700,21 @@ if (payload.bloqueado === true) {
 setErrorMessage(payload.mensagem || 'Substituição bloqueada pelo nutricionista.');
 setResultText('');
 setGroupWarning('');
+setShowSupplementCta(false);
+setSupplementSearchUrl('');
 setResultModalOpen(false);
 setPendingResult(null);
 return;
 }
 const parsed = getResponseText(payload, baseQuery, quantity);
 const warning = getGroupWarning(payload, baseQuery, subQuery);
+const fields = extractGroupFields(payload);
+const shouldShowCta = Boolean(parsed && shouldShowSupplementCta(fields.substituteGroup));
+const nextSearchUrl = shouldShowCta ? buildSupplementSearchUrl(subQuery.trim()) : '';
 setResultText(parsed);
 setGroupWarning(warning);
+setShowSupplementCta(shouldShowCta);
+setSupplementSearchUrl(nextSearchUrl);
 
 const hasDifferentGroups =
 payload.gruposDiferentes === true ||
@@ -921,6 +1001,21 @@ className="w-full rounded-3xl bg-slate-900 px-4 py-3 text-sm font-semibold text-
 'Digite os dados e clique em calcular para ver a equivalência.'
 )}
 </div>
+{showSupplementCta && supplementSearchUrl ? (
+<div className="mt-4 rounded-3xl border border-sky-200 bg-sky-50 p-4">
+<p className="text-sm font-semibold text-sky-900">
+Nutri Dica: Seu suplemento acabou ou está no fim? Veja algumas opções de compra:
+</p>
+<a
+href={supplementSearchUrl}
+target="_blank"
+rel="noopener noreferrer"
+className="mt-3 inline-flex items-center justify-center rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+>
+Ver opções de compra
+</a>
+</div>
+) : null}
 {groupWarning ? (
 <div className="mt-4 rounded-3xl border-l-4 border-amber-500 bg-amber-50 p-4 text-sm text-slate-800">
 <p className="text-sm font-semibold text-slate-800">Aviso clínico</p>

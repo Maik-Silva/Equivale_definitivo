@@ -15,6 +15,7 @@ import { useNutriPerfil } from '@/hooks/use-nutri-perfil';
 import { Toaster } from '@/components/ui/toaster';
 import { EquivalenciaSecurityModal } from '@/components/equivalencia-security-modal';
 import { verificarEquivalencia, formatarQuantidade } from '@/lib/api-equivalencia';
+import { shouldShowSupplementCta, buildSupplementSearchUrl } from '@/lib/equivalence-supplement';
 
 const defaultBrand = {
   nome: 'Nutricionista',
@@ -191,6 +192,12 @@ export default function EquivalePage() {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'https://backend-production-e77b.up.railway.app';
   const { perfil } = useNutriPerfil();
 
+  const supplementGroup = lastPayload ? extractGroupFields(lastPayload).substituteGroup : null;
+  const showSupplementCta = Boolean(resultText && shouldShowSupplementCta(supplementGroup));
+  const supplementSearchUrl = showSupplementCta
+    ? buildSupplementSearchUrl(substituteFood.trim())
+    : '';
+
   useEffect(() => {
     if (!perfil) return;
     setBrand((current) => ({ ...defaultBrand, ...current, ...perfil }));
@@ -360,6 +367,7 @@ export default function EquivalePage() {
     setLoadingEquivalence(true);
     setResultText('');
     setGroupWarning('');
+    setLastPayload(null);
 
     try {
       // Chama a nova API unificada
@@ -688,6 +696,21 @@ export default function EquivalePage() {
                     ) : (
                       <p className="text-sm leading-6 text-slate-600">Digite os alimentos e clique em calcular para ver a equivalência.</p>
                     )}
+                    {showSupplementCta && supplementSearchUrl ? (
+                      <div className="mt-4 rounded-3xl border border-sky-200 bg-sky-50 p-4">
+                        <p className="text-sm font-semibold text-sky-900">
+                          Nutri Dica: Seu suplemento acabou ou está no fim? Veja algumas opções de compra:
+                        </p>
+                        <a
+                          href={supplementSearchUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-3 inline-flex items-center justify-center rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+                        >
+                          Ver opções de compra
+                        </a>
+                      </div>
+                    ) : null}
                     {groupWarning ? (
                       <div className="mt-4 rounded-3xl border-l-4 border-amber-500 bg-amber-50 p-4 text-sm text-slate-800">
                         <p className="text-sm font-semibold text-slate-800">Aviso clínico</p>
