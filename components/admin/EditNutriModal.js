@@ -46,16 +46,26 @@ export default function EditNutriModal({ open, onOpenChange, nutricionista, onSa
     }
 
     const endpoint = `${getAdminApiBaseUrl()}/api/admin/nutricionistas/${encodeURIComponent(nutricionista.id)}`;
+    const payload = JSON.stringify({ nome, email, status });
 
     try {
-      const response = await fetch(endpoint, {
+      let response = await fetch(endpoint, {
         method: 'PUT',
         headers: getAdminHeaders(),
-        body: JSON.stringify({ nome, email, status }),
+        body: payload,
       });
 
+      let body = await response.json().catch(() => ({}));
+      if (!response.ok && (response.status === 404 || response.status === 405)) {
+        response = await fetch(endpoint, {
+          method: 'PATCH',
+          headers: getAdminHeaders(),
+          body: payload,
+        });
+        body = await response.json().catch(() => ({}));
+      }
+
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
         setError(body?.message || 'Falha ao atualizar o nutricionista.');
         setLoading(false);
         return;

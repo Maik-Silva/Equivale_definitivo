@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Activity, Users, UserCheck, ShieldAlert, MoreHorizontal, Edit3, Eye, Slash } from 'lucide-react';
+import { Activity, Users, UserCheck, ShieldAlert, MoreHorizontal, Edit3, Eye, Slash, CreditCard, Trash2 } from 'lucide-react';
 import { BetaLimitAlert } from '@/components/admin/beta-limit-alert';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import EditNutriModal from '@/components/admin/EditNutriModal';
 
 const { getAdminToken, getAdminApiBaseUrl, getAdminHeaders } = require('@/lib/admin-auth');
 const { getLimitProgressState } = require('@/lib/admin-limit-utils');
+const LOG_DAYS = 10;
 
 function ProgressBar({ value, max }) {
   const percentage = Math.min(100, Math.max(0, Math.round((value / max) * 100)));
@@ -58,6 +59,7 @@ export default function AdminDashboardPage() {
   const [limitTargetNutri, setLimitTargetNutri] = useState(null);
   const [limitInput, setLimitInput] = useState('');
   const [changingLimit, setChangingLimit] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -73,7 +75,7 @@ export default function AdminDashboardPage() {
       }
 
       const backend = getAdminApiBaseUrl();
-      const url = `${backend}/api/admin/metrics`;
+      const url = `${backend}/api/admin/metrics?days=${LOG_DAYS}&limit=100`;
 
       try {
         const res = await fetch(url, {
@@ -98,28 +100,83 @@ export default function AdminDashboardPage() {
         const data = await res.json();
         const payload = data?.data || data || {};
 
-        if (payload.cards) setCards(payload.cards);
+        const totalNutris =
+          payload.totalNutris ??
+          payload.total_nutris ??
+          payload.cards?.totalNutris ??
+          payload.cards?.total_nutris ??
+          (Array.isArray(payload.nutricionistas) ? payload.nutricionistas.length : 0);
+        const totalPacientes =
+          payload.totalPacientes ??
+          payload.total_pacientes ??
+          payload.cards?.totalPacientes ??
+          payload.cards?.total_pacientes ??
+          payload.totalPacientesAtivos ??
+          payload.total_pacientes_ativos ??
+          0;
+        const totalAcessos =
+          payload.totalAcessos ??
+          payload.total_acessos ??
+          payload.cards?.totalAcessos ??
+          payload.cards?.total_acessos ??
+          payload.acessosRecentes?.length ??
+          payload.acessos?.length ??
+          0;
+
+        setCards({ totalNutris, totalPacientes, totalAcessos });
         if (Array.isArray(payload.nutricionistas)) {
           setNutricionistas(
             payload.nutricionistas.map((n) => ({
               id: n.id ?? n._id ?? n.email,
               nome: n.nome || n.name || n.nome_completo || n.fullName || n.email || 'Sem nome',
               email: n.email || 'sem-email@exemplo.com',
-              totalPacientes: Number(n.totalPacientes ?? n.pacientes ?? n.patients ?? 0),
-              limite_pacientes: Number(n.limite_pacientes ?? n.limite ?? n.limitePacientes ?? 5),
-              status: String(n.status || n.estado || 'ativo').toLowerCase(),
+              totalPacientes: Number(
+                n.totalPacientes ??
+                n.total_pacientes ??
+                n.pacientes ??
+                n.pacientes_vinculados ??
+                n.pacientesAtivos ??
+                n.pacientes_ativos ??
+                n.patients ??
+                n.paciente_count ??
+                n.pacientesCount ??
+                0
+              ),
+              limite_pacientes: Number(
+                n.limite_pacientes ??
+                n.limite ??
+                n.limitePacientes ??
+                n.limit ??
+                5
+              ),
+              status: String(n.status || n.estado || n.situacao || 'ativo').toLowerCase(),
             }))
           );
         }
 
         if (Array.isArray(payload.acessosRecentes)) {
           setAcessosRecentes(
-            payload.acessosRecentes.map((a) => ({
-              id: a.id ?? a._id ?? `${normalizeName(a.patient)}-${a.data_acesso}`,
-              patient: normalizeName(a.patient || a.nome_paciente || a.nomePaciente || a.paciente),
-              nutritionist: normalizeName(a.nutricionista || a.nome_nutricionista || a.nomeNutri),
-              date: a.data_acesso || a.date || a.createdAt || '',
-            }))
+            payload.acessosRecentes.map((a) => {
+              // Try to find nutritionist name from multiple possible sources
+              let nutriName = normalizeName(a.nutricionista || a.nome_nutricionista || a.nomeNutri || a.nutricionista?.nome);
+              if (!nutriName || nutriName === '') {
+                // Fallback: try to find in nutricionistas array if available
+                const foundNutri = Array.isArray(payload.nutricionistas)
+                  ? payload.nutricionistas.find(n => 
+                      n.id === a.nutricionista_id || 
+                      n._id === a.nutricionista_id || 
+                      n.email === a.nutricionista_email
+                    )
+                  : null;
+                nutriName = foundNutri?.nome || 'Desconhecido';
+              }
+              return {
+                id: a.id ?? a._id ?? `${normalizeName(a.patient)}-${a.data_acesso}`,
+                patient: normalizeName(a.patient || a.nome_paciente || a.nomePaciente || a.paciente),
+                nutritionist: nutriName,
+                date: a.data_acesso || a.date || a.createdAt || '',
+              };
+            })
           );
         }
 
@@ -202,6 +259,34 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleDeleteNutri = async (nutri) => {
+    if (!nutri?.id) return;
+    
+    if (!window.confirm(`Tem certeza que deseja excluir ${nutri.nome}? Esta ação não pode ser desfeita e deletará todos os dados associados.`)) {
+      return;
+    }
+
+    setDeletingId(nutri.id);
+    try {
+      const response = await fetch(`${getAdminApiBaseUrl()}/api/admin/nutricionistas/${encodeURIComponent(nutri.id)}`, {
+        method: 'DELETE',
+        headers: getAdminHeaders(),
+      });
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body?.message || 'Falha ao excluir nutricionista.');
+      }
+
+      setNutricionistas((current) => current.filter((item) => item.id !== nutri.id));
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'Erro ao excluir nutricionista.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const metrics = [
     {
       label: 'Nutricionistas Cadastrados',
@@ -273,7 +358,7 @@ export default function AdminDashboardPage() {
               })}
             </section>
 
-            <div className="mt-10 grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+            <div className="mt-10 grid gap-6 lg:grid-cols-1">
               <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/40">
                 <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -349,6 +434,14 @@ export default function AdminDashboardPage() {
                                       <Slash className="h-4 w-4 text-rose-500" />
                                       Suspender
                                     </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => window.alert('Funcionalidade de mudar plano em desenvolvimento')} className="gap-3">
+                                      <CreditCard className="h-4 w-4 text-slate-500" />
+                                      Mudar plano
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => handleDeleteNutri(nutri)} className="gap-3 text-rose-600" disabled={deletingId === nutri.id}>
+                                      <Trash2 className="h-4 w-4 text-rose-500" />
+                                      {deletingId === nutri.id ? 'Excluindo...' : 'Excluir'}
+                                    </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               </div>
@@ -360,33 +453,31 @@ export default function AdminDashboardPage() {
                   </table>
                 </div>
               </section>
-
-              <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/40">
-                <div className="mb-6 flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Acessos Recentes</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-slate-900">Últimos pacientes ativos</h2>
-                  </div>
-                  <span className="rounded-3xl bg-slate-100 px-4 py-2 text-sm text-slate-700">Histórico real</span>
-                </div>
-
-                <div className="space-y-4">
-                  {acessosRecentes.map((access) => (
-                    <article key={access.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <p className="text-base font-semibold text-slate-900">{access.patient}</p>
-                          <p className="text-sm text-slate-600">Nutricionista: {access.nutritionist}</p>
-                        </div>
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
-                          {formatDateBR(access.date)}
-                        </span>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
             </div>
+
+            <section className="mt-10 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/40">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Acessos Recentes</p>
+                  <h2 className="mt-3 text-2xl font-semibold text-slate-900">Últimos pacientes ativos</h2>
+                </div>
+                <span className="rounded-3xl bg-slate-100 px-4 py-2 text-sm text-slate-700">Histórico real</span>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
+                {acessosRecentes.map((access) => (
+                  <article key={access.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="space-y-2">
+                      <p className="text-base font-semibold text-slate-900">{access.patient}</p>
+                      <p className="text-sm text-slate-600">Nutricionista: <span className="font-medium text-slate-900">{access.nutritionist}</span></p>
+                      <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
+                        {formatDateBR(access.date)}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
 
             <div className="mt-10 grid gap-6 lg:grid-cols-2">
               <BetaLimitAlert variant="nutri" />

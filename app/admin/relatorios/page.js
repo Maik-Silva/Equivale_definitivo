@@ -8,8 +8,32 @@ import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts'
 import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 
+const LOG_DAYS = 10;
+
 const { getAdminToken, getAdminApiBaseUrl, getAdminHeaders } = require('@/lib/admin-auth');
 const { normalizeAccess } = require('@/lib/admin-data-normalizers');
+
+function toText(value, fallback = '') {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value.trim() || fallback;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const joined = value.map(item => toText(item, '')).filter(Boolean).join(', ');
+    return joined || fallback;
+  }
+  if (typeof value === 'object') {
+    const candidates = [
+      value.nome, value.name, value.fullName, value.displayName, value.email,
+      value.nutricionista, value.nome_nutricionista, value.nomeNutri
+    ];
+    for (const candidate of candidates) {
+      const converted = toText(candidate, '');
+      if (converted) return converted;
+    }
+    return fallback;
+  }
+  return fallback;
+}
 
 function formatDateBR(value) {
   const date = new Date(value);
@@ -43,7 +67,7 @@ export default function AdminRelatoriosPage() {
       }
 
       try {
-        const response = await fetch(`${getAdminApiBaseUrl()}/api/admin/metrics`, {
+        const response = await fetch(`${getAdminApiBaseUrl()}/api/admin/metrics?days=${LOG_DAYS}&limit=100`, {
           method: 'GET',
           headers: getAdminHeaders(),
         });
@@ -54,11 +78,14 @@ export default function AdminRelatoriosPage() {
         }
 
         const payload = body?.data || body || {};
+        const cards = payload.cards || payload.data?.cards || {};
         setMetrics({
           totalNutris:
-            payload.totalNutris ?? payload.totalNutricionistas ?? payload.nutricionistas?.length ?? 0,
-          totalPacientes: payload.totalPacientes ?? payload.totalPacientes ?? payload.pacientes?.length ?? 0,
-          totalAcessos: payload.totalAcessos ?? payload.acessos ?? 0,
+            payload.totalNutris ?? payload.totalNutricionistas ?? cards.totalNutris ?? cards.totalNutricionistas ?? payload.nutricionistas?.length ?? 0,
+          totalPacientes:
+            payload.totalPacientes ?? cards.totalPacientes ?? payload.pacientes?.length ?? 0,
+          totalAcessos:
+            payload.totalAcessos ?? cards.totalAcessos ?? payload.acessos ?? 0,
         });
 
         const logs = Array.isArray(payload.acessosRecentes)
@@ -71,7 +98,24 @@ export default function AdminRelatoriosPage() {
           ? payload.data.acessos
           : [];
 
-        setAcessosRecentes(logs.map(normalizeAccess));
+        // Normalize access logs with proper nutritionist identification
+        const normalizedLogs = logs.map(item => {
+          let nutriName = toText(item.nutricionista ?? item.nome_nutricionista ?? item.nomeNutri ?? item.nutritionist, '');
+          if (!nutriName) {
+            // Fallback: try to find in nutricionistas array if available
+            const foundNutri = Array.isArray(payload.nutricionistas)
+              ? payload.nutricionistas.find(n => 
+                  n.id === item.nutricionista_id || 
+                  n._id === item.nutricionista_id || 
+                  n.email === item.nutricionista_email
+                )
+              : null;
+            nutriName = foundNutri?.nome || 'Desconhecido';
+          }
+          return normalizeAccess({ ...item, nutricionista: nutriName });
+        });
+
+        setAcessosRecentes(normalizedLogs);
       } catch (err) {
         setError(err?.message || 'Erro ao carregar dados de relatórios.');
       } finally {
@@ -198,7 +242,7 @@ export default function AdminRelatoriosPage() {
             })}
           </div>
 
-          <div className="mt-8 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+          <div className="mt-8 grid gap-6">
             <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/40">
               <div className="mb-6 flex items-center justify-between gap-4">
                 <div>
@@ -206,7 +250,7 @@ export default function AdminRelatoriosPage() {
                   <h2 className="mt-2 text-2xl font-semibold text-slate-900">Tendência de acessos</h2>
                 </div>
                 <span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-600">
-                  Últimos {chartData.length || 7} dias
+                  Últimos {LOG_DAYS} dias
                 </span>
               </div>
               <div className="h-[320px]">
@@ -246,15 +290,16 @@ export default function AdminRelatoriosPage() {
                 </Button>
               </div>
               <div className="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-slate-50">
-                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                  <thead className="bg-slate-100">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold text-slate-600">Data</th>
-                      <th className="px-4 py-3 font-semibold text-slate-600">Paciente</th>
-                      <th className="px-4 py-3 font-semibold text-slate-600">Nutricionista</th>
-                    </tr>
-                  </thead>
-                  <tbody className="max-h-96 divide-y divide-slate-200 bg-white text-slate-700">
+                <div className="max-h-[420px] overflow-y-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold text-slate-600">Data</th>
+                        <th className="px-4 py-3 font-semibold text-slate-600">Paciente</th>
+                        <th className="px-4 py-3 font-semibold text-slate-600">Nutricionista</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white text-slate-700">
                     {loading ? (
                       <tr>
                         <td colSpan={3} className="px-4 py-8 text-center text-slate-500">
@@ -278,6 +323,7 @@ export default function AdminRelatoriosPage() {
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             </section>
           </div>

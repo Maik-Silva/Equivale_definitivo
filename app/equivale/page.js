@@ -170,7 +170,6 @@ export default function EquivalePage() {
   const [resultText, setResultText] = useState('');
   const [groupWarning, setGroupWarning] = useState('');
   const [lastPayload, setLastPayload] = useState(null);
-  const [showPayload, setShowPayload] = useState(false);
   const [historico, setHistorico] = useState([]);
   const [exibirHistorico, setExibirHistorico] = useState(false);
   const [baseOptions, setBaseOptions] = useState([]);
@@ -210,11 +209,23 @@ export default function EquivalePage() {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         setHistorico(parsed);
+        if (parsed.length > 0) {
+          setExibirHistorico(true);
+        }
       }
     } catch (error) {
       console.warn('Não foi possível carregar o histórico de equivalências:', error);
     }
   }, []);
+
+  function handleLimparHistorico() {
+    try {
+      localStorage.removeItem('historicoEquivalencias');
+    } catch (error) {
+      console.warn('Não foi possível limpar o histórico no localStorage:', error);
+    }
+    setHistorico([]);
+  }
 
   function getEquivalentQuantity(payload) {
     if (!payload) return '';
@@ -457,6 +468,7 @@ export default function EquivalePage() {
       }
       return next;
     });
+    setExibirHistorico(true);
   }
 
   function extractResponseText(response) {
@@ -728,7 +740,18 @@ export default function EquivalePage() {
 
                     {exibirHistorico && (
                       <div className="mt-4 space-y-3 w-full">
-                        <h3 className="text-sm font-bold text-gray-500 px-1">Histórico Recente</h3>
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-bold text-gray-500 px-1">Histórico Recente</h3>
+                          {historico.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={handleLimparHistorico}
+                              className="text-xs text-slate-500 underline"
+                            >
+                              Limpar histórico
+                            </button>
+                          ) : null}
+                        </div>
                         {historico.length === 0 ? (
                           <p className="text-xs text-gray-400 italic text-center py-2 bg-gray-50 rounded-lg">Nenhuma substituição salva ainda.</p>
                         ) : (
@@ -748,23 +771,6 @@ export default function EquivalePage() {
                       </div>
                     )}
 
-                    {/* Debug: raw payload viewer - toggleable */}
-                    {lastPayload ? (
-                      <div className="mt-4">
-                        <button
-                          type="button"
-                          onClick={() => setShowPayload((s) => !s)}
-                          className="text-xs text-slate-500 underline"
-                        >
-                          {showPayload ? 'Ocultar payload bruto' : 'Mostrar payload bruto'}
-                        </button>
-                        {showPayload ? (
-                          <pre className="mt-2 max-h-64 overflow-auto rounded bg-slate-100 p-3 text-xs">
-                            {JSON.stringify(lastPayload, null, 2)}
-                          </pre>
-                        ) : null}
-                      </div>
-                    ) : null}
                   </div>
                 </div>
 

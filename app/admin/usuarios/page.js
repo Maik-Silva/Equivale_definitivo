@@ -1,28 +1,24 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { Users, Edit3, MoreHorizontal, Eye, Trash2, Slash, CreditCard } from 'lucide-react';
+import { Users, Edit3, MoreHorizontal, Trash2, Slash, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 import EditNutriModal from '@/components/admin/EditNutriModal';
-
-const { getAdminToken, getAdminApiBaseUrl, getAdminHeaders } = require('@/lib/admin-auth');
-const { normalizeUser, normalizePaciente, extractList } = require('@/lib/admin-data-normalizers');
+import { getAdminToken, getAdminApiBaseUrl, getAdminHeaders } from '@/lib/admin-auth';
+import { normalizeUser, normalizePaciente, extractList } from '@/lib/admin-data-normalizers';
 
 export default function AdminUsuariosPage() {
   const [usuarios, setUsuarios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedNutri, setSelectedNutri] = useState(null);
-  const [nutriDetails, setNutriDetails] = useState(null);
-  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [editNutri, setEditNutri] = useState(null);
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [planTargetNutri, setPlanTargetNutri] = useState(null);
-  const [planChoice, setPlanChoice] = useState('básico');
+  const [planChoice, setPlanChoice] = useState('beta');
   const [savingStatusId, setSavingStatusId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [changingPlanId, setChangingPlanId] = useState(null);
@@ -54,59 +50,19 @@ export default function AdminUsuariosPage() {
         throw new Error(data?.message || 'Falha ao carregar nutricionistas.');
       }
 
-      const list = extractList(data, 'nutricionistas', 'users', 'data', 'results');
+      let list = extractList(data, 'nutricionistas', 'users', 'data', 'results');
+      if (list.length === 0 && Array.isArray(data?.data)) {
+        list = data.data;
+      }
+      if (list.length === 0 && Array.isArray(data?.data?.nutricionistas)) {
+        list = data.data.nutricionistas;
+      }
 
       setUsuarios(list.map(normalizeUser));
     } catch (err) {
       setError(err?.message || 'Erro ao carregar nutricionistas.');
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function loadNutriDetails(nutri) {
-    if (!nutri?.id) return;
-    setSelectedNutri(nutri);
-    setNutriDetails(null);
-    setDetailsLoading(true);
-
-    const token = getAdminToken();
-    if (!token) {
-      toast({ title: 'Token ausente', description: 'Faça login novamente para carregar detalhes.' });
-      setDetailsLoading(false);
-      return;
-    }
-
-    try {
-      const response = await fetch(`${getAdminApiBaseUrl()}/api/admin/nutricionistas/${encodeURIComponent(nutri.id)}/detalhes`, {
-        method: 'GET',
-        headers: getAdminHeaders(),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.message || 'Falha ao carregar detalhes do nutricionista.');
-      }
-
-      const details = data?.data || data || {};
-      const rawPacientes = Array.isArray(details.pacientes)
-        ? details.pacientes
-        : Array.isArray(details.patients)
-        ? details.patients
-        : [];
-      setNutriDetails({
-        pacientes: rawPacientes.map(normalizePaciente),
-        totalPacientes: Number(details.totalPacientes ?? rawPacientes.length ?? nutri.totalPacientes ?? 0),
-        suggestionsCount: Number(details.sugestoes?.length ?? details.suggestions?.length ?? details.suggestionsCount ?? details.totalSugestoes ?? 0),
-        suggestions: Array.isArray(details.sugestoes)
-          ? details.sugestoes
-          : Array.isArray(details.suggestions)
-          ? details.suggestions
-          : [],
-      });
-    } catch (err) {
-      toast({ title: 'Erro ao carregar detalhes', description: err?.message || 'Não foi possível buscar detalhes do nutricionista.' });
-    } finally {
-      setDetailsLoading(false);
     }
   }
 
@@ -135,10 +91,6 @@ export default function AdminUsuariosPage() {
       }
       setUsuarios((current) => current.filter((item) => item.id !== nutri.id));
       toast({ title: 'Nutricionista excluído', description: `${nutri.nome} foi removido do sistema.` });
-      if (selectedNutri?.id === nutri.id) {
-        setSelectedNutri(null);
-        setNutriDetails(null);
-      }
     } catch (err) {
       toast({ title: 'Erro ao excluir', description: err?.message || 'Não foi possível excluir o nutricionista.' });
     } finally {
@@ -148,7 +100,8 @@ export default function AdminUsuariosPage() {
 
   function handleOpenPlanModal(nutri) {
     setPlanTargetNutri(nutri);
-    setPlanChoice(nutri.plano || 'básico');
+    const currentPlan = (nutri.plano || 'beta').toLowerCase();
+    setPlanChoice(currentPlan === 'premium' || currentPlan === 'plus' ? 'beta' : currentPlan);
     setPlanModalOpen(true);
   }
 
@@ -164,13 +117,26 @@ export default function AdminUsuariosPage() {
       return;
     }
 
+    const endpoint = `${getAdminApiBaseUrl()}/api/admin/nutricionistas/${encodeURIComponent(planTargetNutri.id)}`;
+    const bodyPayload = JSON.stringify({ plano: planChoice, plan: planChoice });
+
     try {
-      const response = await fetch(`${getAdminApiBaseUrl()}/api/admin/nutricionistas/${encodeURIComponent(planTargetNutri.id)}`, {
+      let response = await fetch(endpoint, {
         method: 'PATCH',
         headers: getAdminHeaders(),
-        body: JSON.stringify({ plano: planChoice, plan: planChoice }),
+        body: bodyPayload,
       });
-      const data = await response.json().catch(() => ({}));
+      let data = await response.json().catch(() => ({}));
+
+      if (!response.ok && (response.status === 404 || response.status === 405)) {
+        response = await fetch(endpoint, {
+          method: 'PUT',
+          headers: getAdminHeaders(),
+          body: bodyPayload,
+        });
+        data = await response.json().catch(() => ({}));
+      }
+
       if (!response.ok) {
         throw new Error(data?.message || 'Falha ao atualizar o plano.');
       }
@@ -247,7 +213,6 @@ export default function AdminUsuariosPage() {
       )
     );
 
-    setSelectedNutri(null);
     toast({
       title: 'Usuário salvo',
       description: 'As alterações foram registradas com sucesso.',
@@ -311,22 +276,14 @@ export default function AdminUsuariosPage() {
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <Button
+                            type="button"
                             variant="outline"
                             size="sm"
                             className="rounded-full px-3 py-2"
-                            onClick={() => setSelectedNutri(usuario)}
+                            onClick={() => setEditNutri(usuario)}
                           >
                             <Edit3 className="h-4 w-4" />
                             Editar
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="rounded-full px-3 py-2"
-                            onClick={() => loadNutriDetails(usuario)}
-                          >
-                            <Eye className="h-4 w-4" />
-                            Ver
                           </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -360,72 +317,6 @@ export default function AdminUsuariosPage() {
         </section>
       </div>
 
-      {selectedNutri ? (
-        <section className="mt-8 rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm shadow-slate-200/40">
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-2xl font-semibold text-slate-900">{selectedNutri.nome}</h2>
-              <p className="mt-1 text-sm text-slate-600">{selectedNutri.email}</p>
-              <p className="mt-1 text-sm text-slate-600">Plano atual: {selectedNutri.plano}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-center">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Pacientes</p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">{selectedNutri.totalPacientes}</p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-center">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Sugestões</p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">{selectedNutri.suggestionsCount}</p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-center">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Status</p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900 capitalize">{selectedNutri.status}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-8">
-            {detailsLoading ? (
-              <p className="text-sm text-slate-600">Carregando detalhes do nutricionista...</p>
-            ) : nutriDetails ? (
-              <div className="space-y-6">
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Pacientes vinculados</p>
-                    <p className="mt-2 text-2xl font-semibold text-slate-900">{nutriDetails.totalPacientes}</p>
-                  </div>
-                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Sugestões geradas</p>
-                    <p className="mt-2 text-2xl font-semibold text-slate-900">{nutriDetails.suggestionsCount}</p>
-                  </div>
-                </div>
-
-                {nutriDetails.pacientes.length > 0 ? (
-                  <div className="rounded-[1.5rem] border border-slate-200 bg-white p-6">
-                    <div className="flex items-center justify-between gap-4">
-                      <h3 className="text-lg font-semibold text-slate-900">Pacientes vinculados</h3>
-                      <span className="text-sm text-slate-500">{nutriDetails.pacientes.length} pacientes</span>
-                    </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      {nutriDetails.pacientes.map((paciente, index) => (
-                        <div key={`${paciente.id ?? paciente.email ?? index}`} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="font-medium text-slate-900">{paciente.nome || paciente.name || paciente.email || 'Sem nome'}</p>
-                          <p className="mt-1 text-sm text-slate-600">{paciente.email || paciente.emailPaciente || paciente.email || 'Sem e-mail'}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-600">Nenhum paciente vinculado retornado nos detalhes.</p>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-slate-600">Clique em "Ver" para carregar os pacientes e as sugestões geradas.</p>
-            )}
-          </div>
-        </section>
-      ) : null}
-
       {planModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4">
           <div className="w-full max-w-lg rounded-[2rem] bg-white p-8 shadow-lg shadow-slate-900/10">
@@ -447,9 +338,9 @@ export default function AdminUsuariosPage() {
                   onChange={(event) => setPlanChoice(event.target.value)}
                   className="mt-2 w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none"
                 >
-                  <option value="básico">Básico</option>
-                  <option value="profissional">Profissional</option>
-                  <option value="premium">Premium</option>
+                  <option value="beta">Beta (disponível)</option>
+                  <option value="premium" disabled>Premium (não disponível)</option>
+                  <option value="plus" disabled>Plus (não disponível)</option>
                 </select>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
@@ -466,11 +357,11 @@ export default function AdminUsuariosPage() {
       ) : null}
 
       <EditNutriModal
-        open={Boolean(selectedNutri)}
+        open={Boolean(editNutri)}
         onOpenChange={(open) => {
-          if (!open) setSelectedNutri(null);
+          if (!open) setEditNutri(null);
         }}
-        nutricionista={selectedNutri}
+        nutricionista={editNutri}
         onSaved={handleSaved}
       />
 

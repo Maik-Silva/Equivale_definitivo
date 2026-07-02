@@ -419,6 +419,9 @@ try {
 const dados = JSON.parse(localStorage.getItem('historicoEquivalencias')) || [];
 if (Array.isArray(dados)) {
 setHistorico(dados);
+if (dados.length > 0) {
+setExibirHistorico(true);
+}
 }
 } catch (error) {
 console.warn('Não foi possível carregar o histórico do localStorage:', error);
@@ -752,6 +755,7 @@ equivalentQuantity: equivalentQuantity || parsed || 0,
 };
 const novoHistorico = [novoItem, ...historico].slice(0, 20);
 setHistorico(novoHistorico);
+setExibirHistorico(true);
 try {
 localStorage.setItem('historicoEquivalencias', JSON.stringify(novoHistorico));
 } catch (error) {
